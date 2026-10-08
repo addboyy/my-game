@@ -2,14 +2,14 @@
   color-scheme: dark;
   font-family: "Black Han Sans", "Malgun Gothic", "Apple SD Gothic Neo", sans-serif;
   font-weight: 400;
-  color: #f0f1e9;
-  background: #111713;
+  color: #f4eefc;
+  background: #16111f;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
-  --muted: #9ba69b;
-  --line: rgba(222, 232, 216, 0.15);
-  --accent: #c5ec77;
+  --muted: #a99bbd;
+  --line: rgba(214, 190, 245, 0.18);
+  --accent: #c8a2f0;
 }
 
 * {
@@ -21,9 +21,9 @@ body {
   min-height: 100vh;
   margin: 0;
   background-image:
-    linear-gradient(rgba(202, 225, 197, 0.025) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(202, 225, 197, 0.025) 1px, transparent 1px),
-    radial-gradient(ellipse at 50% 20%, #202b22 0%, #111713 58%);
+    linear-gradient(rgba(200, 162, 240, 0.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(200, 162, 240, 0.045) 1px, transparent 1px),
+    radial-gradient(ellipse at 50% 20%, #2e2342 0%, #16111f 58%);
   background-size: 48px 48px, 48px 48px, auto;
 }
 
@@ -64,7 +64,7 @@ body {
 
 h1 {
   margin: 0;
-  color: #ffd84d;
+  color: #dcbfff;
   font-size: 92px;
   font-weight: 400;
   line-height: 1.15;
@@ -76,7 +76,7 @@ h1 {
 
 .greeting {
   margin: 22px 0 0;
-  color: #c2cbc0;
+  color: #cfc3de;
   font-size: 20px;
   line-height: 1.7;
 }
@@ -123,12 +123,25 @@ h2 {
 }
 
 .game-name {
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
   font-size: 17px;
   transform-origin: left center;
   transition: transform 160ms ease;
   color: inherit;
   text-decoration: none;
+}
+
+.game-icon {
+  flex: none;
+  width: 36px;
+  height: 36px;
+  padding: 5px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(200, 162, 240, 0.1);
+  object-fit: contain;
 }
 
 .game-name:hover,
@@ -163,7 +176,7 @@ h2 {
   padding: 22px 24px;
   border: 1px solid var(--line);
   border-radius: 6px;
-  background: rgba(202, 225, 197, 0.03);
+  background: rgba(200, 162, 240, 0.06);
 }
 
 .idea-number {
@@ -192,7 +205,7 @@ h2 {
 }
 
 .idea-card dd:first-of-type {
-  color: #ffd84d;
+  color: #dcbfff;
   font-size: 18px;
 }
 
