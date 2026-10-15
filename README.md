@@ -9,6 +9,10 @@
 1번 아이디어 Chair Drift (체어 드리프트) 로 선정했다.
 제일 간단하고 내가 좋아하는 레이싱 게임을 만들 수 있을것 같아서 선정했다.
 
+## 사용한 에셋
+- 자동차(`images/car.png`), 학생(`images/student.png`), 잔디(`images/grass.png`), 나무(`images/tree.png`): Kenney Racing Pack (CC0) — https://kenney.nl/assets/racing-pack
+- 의자(`images/chair.svg`): 직접 만든 SVG
+
 ## 진행 상황
 - [x] 1주차: 자기소개 페이지
 - [x] 2주차: GitHub 배포
