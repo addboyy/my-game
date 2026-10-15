@@ -17,9 +17,9 @@
     <circle cx="50" cy="60" r="4"/>
   </g>
   <!-- 앉는 부분 -->
-  <rect x="12" y="14" width="40" height="38" rx="9" fill="#1e6fd9" stroke="#0f4a99" stroke-width="2"/>
+  <rect x="12" y="14" width="40" height="38" rx="9" fill="#c256b0" stroke="#974189" stroke-width="2"/>
   <!-- 등받이 (뒤쪽 = 아래) -->
-  <rect x="10" y="46" width="44" height="10" rx="5" fill="#0f4a99"/>
+  <rect x="10" y="46" width="44" height="10" rx="5" fill="#bb55aa"/>
   <!-- 팔걸이 -->
   <rect x="6" y="22" width="6" height="22" rx="3" fill="#2b2b2b"/>
   <rect x="52" y="22" width="6" height="22" rx="3" fill="#2b2b2b"/>

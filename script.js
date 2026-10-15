@@ -26,10 +26,10 @@ const TREES = [
   { x: 715, y: 450 },
 ];
 
-// 플레이어(의자): 32×32, 화면 중간 아래부분
-const CHAIR_X = 384;      // 왼쪽 위 꼭짓점 x
-const CHAIR_Y = 500;      // 왼쪽 위 꼭짓점 y
-const CHAIR_SIZE = 32;
+// 플레이어(의자): 50×50, 화면 중간 아래부분
+const CHAIR_X = 375;      // 왼쪽 위 꼭짓점 x
+const CHAIR_Y = 490;      // 왼쪽 위 꼭짓점 y
+const CHAIR_SIZE = 50;
 
 // 다른 학생: 위에서 본 초록 옷 학생 (x, y는 "중심")
 const STUDENT_WIDTH = 52;
@@ -41,8 +41,8 @@ const STUDENTS = [
 ];
 
 // 자동차: 40×70
-const CAR_X = 560;
-const CAR_Y = 360;
+const CAR_X = 590;
+const CAR_Y = 300;
 const CAR_WIDTH = 40;
 const CAR_HEIGHT = 70;
 
