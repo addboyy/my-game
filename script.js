@@ -40,11 +40,12 @@ const STUDENTS = [
   { x: 420, y: 200 },
 ];
 
-// 자동차: 40×70
-const CAR_X = 590;
-const CAR_Y = 300;
+// 자동차: 40×70, 오른쪽 차선을 따라 아래로 내려간다
+const CAR_X = 590;        // 차선 위치 (가로는 움직이지 않는다)
 const CAR_WIDTH = 40;
 const CAR_HEIGHT = 70;
+let carY = 300;           // 자동차의 세로 위치 (매 프레임 바뀐다)
+let carSpeedY = 4;        // 한 프레임에 아래로 4씩 (양수 = 아래, 음수 = 위)
 
 // 강의실 문: 노란 사각형 + "강의실" 글자 (건물 아래쪽에 붙어 있다)
 const DOOR_X = 340;
@@ -53,7 +54,8 @@ const DOOR_WIDTH = 120;
 const DOOR_HEIGHT = 40;
 
 // 남은 시간 글자: 화면 위 가운데
-const TIME_LEFT = 60;     // 아직 줄어들지 않는다 (4주차에 1초씩 줄어들게 만든다)
+let timeLeft = 60;        // 남은 시간(초). 1초마다 1씩 줄어든다
+let lastSecondTime = 0;   // 마지막으로 1초를 줄인 시각 (Date.now() 값, 밀리초)
 
 // 부스터 게이지: 화면 아래 가운데
 const GAUGE_X = 300;
@@ -78,9 +80,10 @@ let loadedCount = 0;     // 지금까지 불러온 이미지 개수
 for (const image of allImages) {
   image.onload = function () {
     loadedCount = loadedCount + 1;
-    // 마지막 이미지까지 다 불러왔으면 화면을 그린다
+    // 마지막 이미지까지 다 불러왔으면 게임 루프에 시동을 건다
     if (loadedCount === allImages.length) {
-      drawScreen();
+      lastSecondTime = Date.now();   // 시간 재기 시작
+      gameLoop();                    // 첫 시동 (그 뒤로는 루프가 스스로 자기를 부른다)
     }
   };
 }
@@ -92,9 +95,31 @@ studentImage.src = "images/student.png";
 treeImage.src = "images/tree.png";
 grassImage.src = "images/grass.png";
 
-// ===== 화면 그리기 =====
+// ===== 게임 루프: 지우기 → 계산 → 그리기 → 다음 프레임 예약 =====
 
-function drawScreen() {
+function gameLoop() {
+  // ===== ① 지우기: 이전 프레임 그림을 없앤다 =====
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  // ===== ② 계산: 상태(숫자)를 바꾼다 =====
+
+  // 자동차를 속도만큼 아래로 옮긴다
+  carY = carY + carSpeedY;
+
+  // 화면 아래로 완전히 사라지면, 화면 위(건물 뒤)에서 다시 나타난다
+  if (carY > canvas.height) {
+    carY = -CAR_HEIGHT;
+  }
+
+  // 1초(1000밀리초)가 지났으면 남은 시간을 1 줄인다 (0에서 멈춘다)
+  // 프레임 수를 세지 않고 실제 시계로 재므로, 화면이 빠른 기기에서도 똑같이 1초다
+  if (Date.now() - lastSecondTime >= 1000 && timeLeft > 0) {
+    timeLeft = timeLeft - 1;
+    lastSecondTime = lastSecondTime + 1000;
+  }
+
+  // ===== ③ 그리기: 바뀐 숫자대로 화면을 그린다 =====
+
   // ----- 1. 잔디 (양쪽) -----
   // [새로 시도] 패턴: 작은 잔디 그림을 타일처럼 반복해서 칠한다
   ctx.fillStyle = ctx.createPattern(grassImage, "repeat");
@@ -143,6 +168,10 @@ function drawScreen() {
     ctx.drawImage(treeImage, tree.x, tree.y, TREE_SIZE, TREE_SIZE);
   }
 
+  // ----- 자동차 -----
+  // 건물보다 먼저 그려야, 위에서 다시 나타날 때 건물 뒤에서 나오는 것처럼 보인다
+  ctx.drawImage(carImage, CAR_X, carY, CAR_WIDTH, CAR_HEIGHT);
+
   // ----- 6. 강의실 건물 (맨 위) -----
   // 벽돌색 건물 벽
   ctx.fillStyle = "#9c4a3a";
@@ -188,9 +217,6 @@ function drawScreen() {
     );
   }
 
-  // ----- 9. 자동차 -----
-  ctx.drawImage(carImage, CAR_X, CAR_Y, CAR_WIDTH, CAR_HEIGHT);
-
   // ----- 10. 플레이어 의자 -----
   ctx.drawImage(chairImage, CHAIR_X, CHAIR_Y, CHAIR_SIZE, CHAIR_SIZE);
 
@@ -203,7 +229,7 @@ function drawScreen() {
   ctx.font = "bold 24px sans-serif";
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  ctx.fillText("남은 시간 " + TIME_LEFT + "초", 400, 28);
+  ctx.fillText("남은 시간 " + timeLeft + "초", 400, 28);
 
   // ----- 12. 부스터 게이지 (화면 아래 가운데) -----
   // 게이지 뒤 반투명 검은 띠
@@ -226,4 +252,7 @@ function drawScreen() {
   // 게이지 테두리
   ctx.strokeStyle = "#ffffff";
   ctx.strokeRect(GAUGE_X, GAUGE_Y, GAUGE_WIDTH, GAUGE_HEIGHT);
+
+  // ===== ④ 다음 프레임 예약: 다음 그림 때 gameLoop를 또 불러 달라고 부탁한다 =====
+  requestAnimationFrame(gameLoop);
 }
