@@ -37,6 +37,15 @@ const GRASS_BLADE_HEIGHT = 18;   // 풀잎 길이
 const GRASS_SWAY = 4;            // 풀잎 끝이 좌우로 흔들리는 최대 거리
 let swayTime = 0;                // 흔들림 시계: 매 프레임 조금씩 커진다
 const SWAY_SPEED = 0.05;         // 흔들리는 빠르기 (클수록 빨리 흔들린다)
+const TREE_SWAY_ANGLE = 0.04;    // 나무가 좌우로 기우는 최대 각도 (0.04 ≈ 2도)
+
+// 구름 그림자: 하늘의 구름이 땅에 드리운 반투명 그림자가 천천히 가로지른다
+// x가 매 프레임 바뀌므로 let. size는 크기 배율 (1 = 기본)
+let clouds = [
+  { x: -100, y: 260, speedX: 0.4, size: 1 },
+  { x: 500, y: 470, speedX: 0.25, size: 0.8 },
+];
+const CLOUD_RADIUS = 110;        // 구름 그림자 가로 반지름 (size가 1일 때)
 
 // 플레이어(의자): 50×50, 화면 중간 아래부분
 const CHAIR_X = 375;      // 왼쪽 위 꼭짓점 x
@@ -70,6 +79,10 @@ let car2SpeedY = -4;      // 한 프레임에 위로 4씩 (음수 = 위)
 // 자동차와 15픽셀 여유를 두어서 학생과 자동차가 절대 겹치지 않는다
 const WALK_LEFT = CAR2_X + CAR_WIDTH + 15;    // 225
 const WALK_RIGHT = CAR_X - 15;                // 575
+const STUDENT_WOBBLE = 0.12;  // 걸을 때 몸이 좌우로 흔들리는 각도 (0.12 ≈ 7도)
+
+// 자동차 전조등: 자동차 앞쪽으로 뻗는 노란 반투명 빛
+const HEADLIGHT_LENGTH = 45;  // 빛이 뻗는 길이
 
 // 강의실 문: 노란 사각형 + "강의실" 글자 (건물 아래쪽에 붙어 있다)
 const DOOR_X = 340;
@@ -154,6 +167,14 @@ function gameLoop() {
     }
   }
 
+  // 구름 그림자를 오른쪽으로 천천히 옮기고, 화면 오른쪽 밖으로 나가면 왼쪽 밖에서 다시 들어온다
+  for (const cloud of clouds) {
+    cloud.x = cloud.x + cloud.speedX;
+    if (cloud.x - CLOUD_RADIUS * cloud.size > canvas.width) {
+      cloud.x = -CLOUD_RADIUS * cloud.size;
+    }
+  }
+
   // 1초(1000밀리초)가 지났으면 남은 시간을 1 줄인다 (0에서 멈춘다)
   // 프레임 수를 세지 않고 실제 시계로 재므로, 화면이 빠른 기기에서도 똑같이 1초다
   if (Date.now() - lastSecondTime >= 1000 && timeLeft > 0) {
@@ -223,10 +244,20 @@ function gameLoop() {
     ctx.fillRect(x, CROSSWALK_Y, 20, CROSSWALK_HEIGHT);
   }
 
-  // ----- 5. 나무 (잔디 위) -----
+  // ----- 5. 나무 (잔디 위): 풀과 같은 흔들림 시계로 살짝 기울었다 돌아온다 -----
   for (const tree of TREES) {
-    ctx.drawImage(treeImage, tree.x, tree.y, TREE_SIZE, TREE_SIZE);
+    const angle = Math.sin(swayTime * 0.8 + tree.y * 0.02) * TREE_SWAY_ANGLE;
+    ctx.save();
+    ctx.translate(tree.x + TREE_SIZE / 2, tree.y + TREE_SIZE / 2);   // 나무 중심으로 붓을 옮긴다
+    ctx.rotate(angle);                                              // 그 자리에서 살짝 돌린다
+    ctx.drawImage(treeImage, -TREE_SIZE / 2, -TREE_SIZE / 2, TREE_SIZE, TREE_SIZE);
+    ctx.restore();
   }
+
+  // ----- 자동차 전조등 -----
+  // 자동차보다 먼저 그려서 빛이 차 밑에서 앞으로 뻗어 나오는 것처럼 보이게 한다
+  drawHeadlights(CAR_X + CAR_WIDTH / 2, carY + CAR_HEIGHT, 1);   // 오른쪽 차: 앞이 아래쪽
+  drawHeadlights(CAR2_X + CAR_WIDTH / 2, car2Y, -1);             // 왼쪽 차: 앞이 위쪽
 
   // ----- 자동차 2대 -----
   // 건물보다 먼저 그려야, 위에서 나타나거나 사라질 때 건물 뒤로 지나가는 것처럼 보인다
@@ -274,33 +305,64 @@ function gameLoop() {
   ctx.textBaseline = "middle";
   ctx.fillText("강의실", DOOR_X + DOOR_WIDTH / 2, DOOR_Y + DOOR_HEIGHT / 2);
 
-  // ----- 8. 다른 학생들 -----
+  // ----- 8. 다른 학생들: 걷는 방향을 보고, 걸음마다 몸이 좌우로 흔들린다 -----
   for (const student of students) {
-    // 이미지는 왼쪽 위 꼭짓점 기준이라, 중심 (x, y)에서 반만큼 빼서 그린다
-    ctx.drawImage(
-      studentImage,
-      student.x - STUDENT_WIDTH / 2,
-      student.y - STUDENT_HEIGHT / 2,
-      STUDENT_WIDTH,
-      STUDENT_HEIGHT
-    );
+    // 학생 그림은 아래쪽을 보고 있다. 오른쪽으로 걸으면 -90도, 왼쪽이면 +90도 돌려서 걷는 쪽을 보게 한다
+    let facing;
+    if (student.speedX > 0) {
+      facing = -Math.PI / 2;
+    } else {
+      facing = Math.PI / 2;
+    }
+    // 걸음 흔들림: x(걸어온 거리)로 계산하므로 걸을 때만 흔들린다
+    const wobble = Math.sin(student.x * 0.3) * STUDENT_WOBBLE;
+
+    ctx.save();
+    ctx.translate(student.x, student.y);   // 학생 중심으로 붓을 옮긴다
+    ctx.rotate(facing + wobble);
+    // 중심 기준으로 그리기 위해 가로·세로의 반만큼 빼서 그린다
+    ctx.drawImage(studentImage, -STUDENT_WIDTH / 2, -STUDENT_HEIGHT / 2, STUDENT_WIDTH, STUDENT_HEIGHT);
+    ctx.restore();
   }
 
   // ----- 10. 플레이어 의자 -----
   ctx.drawImage(chairImage, CHAIR_X, CHAIR_Y, CHAIR_SIZE, CHAIR_SIZE);
 
-  // ----- 11. 글자: 남은 시간 (화면 위 가운데) -----
-  // 글자가 잘 보이게 뒤에 반투명 검은 띠를 깐다
-  ctx.fillStyle = "rgba(0, 0, 0, 0.5)";
-  ctx.fillRect(310, 10, 180, 36);
+  // ----- 구름 그림자 (땅 위 모든 것 위에, 글자·게이지 아래에) -----
+  // 타원 3개를 겹쳐서 뭉게구름 모양을 만든다
+  ctx.fillStyle = "rgba(0, 0, 0, 0.12)";
+  for (const cloud of clouds) {
+    const r = CLOUD_RADIUS * cloud.size;
+    // 한 경로에 담아 한 번에 칠해야 겹친 부분이 더 진해지지 않는다
+    // moveTo로 각 타원의 시작점(오른쪽 끝)으로 먼저 옮겨야 타원끼리 선으로 이어지지 않는다
+    ctx.beginPath();
+    ctx.moveTo(cloud.x + r, cloud.y);
+    ctx.ellipse(cloud.x, cloud.y, r, r * 0.45, 0, 0, Math.PI * 2);                            // 가운데 큰 덩어리
+    ctx.moveTo(cloud.x - r * 0.5 + r * 0.5, cloud.y + r * 0.1);
+    ctx.ellipse(cloud.x - r * 0.5, cloud.y + r * 0.1, r * 0.5, r * 0.35, 0, 0, Math.PI * 2);   // 왼쪽 작은 덩어리
+    ctx.moveTo(cloud.x + r * 0.55 + r * 0.45, cloud.y - r * 0.05);
+    ctx.ellipse(cloud.x + r * 0.55, cloud.y - r * 0.05, r * 0.45, r * 0.3, 0, 0, Math.PI * 2); // 오른쪽 작은 덩어리
+    ctx.fill();
+  }
 
-  // 10초 이하로 남으면 글자를 빨갛게 해서 급하다는 걸 보여 준다
+  // ----- 11. 글자: 남은 시간 (화면 위 가운데) -----
+  // 글자가 잘 보이게 뒤에 반투명 검은 띠를 깐다 (커지는 글자가 들어가게 넉넉히)
+  ctx.fillStyle = "rgba(0, 0, 0, 0.5)";
+  ctx.fillRect(295, 8, 210, 40);
+
+  // 10초 이하로 남으면 글자를 빨갛게 하고, 1초가 줄 때마다 크게 튀었다가 작아진다
+  let timeFontSize = 24;
   if (timeLeft <= 10) {
     ctx.fillStyle = "#ff4d4d";
+    if (timeLeft > 0) {
+      // 마지막으로 1초가 줄어든 뒤 지난 비율 (0 → 1). 막 줄었을 때 가장 크다
+      const passed = (Date.now() - lastSecondTime) / 1000;
+      timeFontSize = 24 + 6 * (1 - Math.min(passed, 1));
+    }
   } else {
     ctx.fillStyle = "#ffffff";
   }
-  ctx.font = "bold 24px sans-serif";
+  ctx.font = "bold " + timeFontSize + "px sans-serif";
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   ctx.fillText("남은 시간 " + timeLeft + "초", 400, 28);
@@ -329,4 +391,26 @@ function gameLoop() {
 
   // ===== ④ 다음 프레임 예약: 다음 그림 때 gameLoop를 또 불러 달라고 부탁한다 =====
   requestAnimationFrame(gameLoop);
+}
+
+// ===== 전조등 그리기 =====
+// frontX, frontY: 자동차 앞 범퍼 가운데 위치
+// direction: 1이면 아래로, -1이면 위로 빛이 뻗는다
+function drawHeadlights(frontX, frontY, direction) {
+  // 그라데이션: 등 쪽은 밝은 노랑, 멀어질수록 투명해져서 빛이 퍼지며 사라지는 것처럼 보인다
+  const endY = frontY + direction * HEADLIGHT_LENGTH;
+  const light = ctx.createLinearGradient(0, frontY, 0, endY);
+  light.addColorStop(0, "rgba(255, 245, 170, 0.75)");
+  light.addColorStop(1, "rgba(255, 245, 170, 0)");
+  ctx.fillStyle = light;
+  for (const side of [-1, 1]) {            // 왼쪽 등(-1), 오른쪽 등(1)
+    const lampX = frontX + side * 12;      // 등 위치: 가운데에서 12픽셀 옆
+    ctx.beginPath();
+    ctx.moveTo(lampX - 4, frontY);                                       // 등 쪽은 좁고
+    ctx.lineTo(lampX + 4, frontY);
+    ctx.lineTo(lampX + 12, frontY + direction * HEADLIGHT_LENGTH);       // 멀어질수록 넓게 퍼진다
+    ctx.lineTo(lampX - 12, frontY + direction * HEADLIGHT_LENGTH);
+    ctx.closePath();
+    ctx.fill();
+  }
 }
