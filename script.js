@@ -45,7 +45,7 @@ const CAR_X = 590;        // 차선 위치 (가로는 움직이지 않는다)
 const CAR_WIDTH = 40;
 const CAR_HEIGHT = 70;
 let carY = 300;           // 자동차의 세로 위치 (매 프레임 바뀐다)
-let carSpeedY = 4;        // 한 프레임에 아래로 4씩 (양수 = 아래, 음수 = 위)
+let carSpeedY = 6;        // 한 프레임에 아래로 6씩 (양수 = 아래, 음수 = 위)
 
 // 강의실 문: 노란 사각형 + "강의실" 글자 (건물 아래쪽에 붙어 있다)
 const DOOR_X = 340;
