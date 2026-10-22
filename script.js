@@ -34,10 +34,12 @@ const CHAIR_SIZE = 50;
 // 다른 학생: 위에서 본 초록 옷 학생 (x, y는 "중심")
 const STUDENT_WIDTH = 52;
 const STUDENT_HEIGHT = 36;
-const STUDENTS = [
-  { x: 250, y: 330 },
-  { x: 520, y: 240 },
-  { x: 420, y: 200 },
+// 학생들은 차도 안에서 좌우로 천천히 걷다가 인도에 닿으면 돌아선다
+// x가 매 프레임 바뀌므로 let. speedX는 한 프레임에 가로로 걷는 양 (양수 = 오른쪽)
+let students = [
+  { x: 250, y: 330, speedX: 1 },
+  { x: 520, y: 240, speedX: -0.7 },
+  { x: 420, y: 200, speedX: 0.5 },
 ];
 
 // 자동차: 40×70, 오른쪽 차선을 따라 아래로 내려간다
@@ -46,6 +48,11 @@ const CAR_WIDTH = 40;
 const CAR_HEIGHT = 70;
 let carY = 300;           // 자동차의 세로 위치 (매 프레임 바뀐다)
 let carSpeedY = 6;        // 한 프레임에 아래로 6씩 (양수 = 아래, 음수 = 위)
+
+// 자동차 2: 왼쪽 차선을 따라 위로 올라간다 (반대 방향, 다른 속도)
+const CAR2_X = 170;       // 왼쪽 차선 위치 (오른쪽 자동차와 대칭)
+let car2Y = 450;          // 자동차 2의 세로 위치
+let car2SpeedY = -4;      // 한 프레임에 위로 4씩 (음수 = 위)
 
 // 강의실 문: 노란 사각형 + "강의실" 글자 (건물 아래쪽에 붙어 있다)
 const DOOR_X = 340;
@@ -111,6 +118,22 @@ function gameLoop() {
     carY = -CAR_HEIGHT;
   }
 
+  // 자동차 2를 속도만큼 위로 옮긴다 (속도가 음수라 y가 줄어든다)
+  car2Y = car2Y + car2SpeedY;
+
+  // 화면 위(건물 뒤)로 완전히 사라지면, 화면 아래에서 다시 나타난다
+  if (car2Y + CAR_HEIGHT < 0) {
+    car2Y = canvas.height;
+  }
+
+  // 학생들을 걷는 속도만큼 옮기고, 인도(차도 끝)에 닿으면 방향을 뒤집는다
+  for (const student of students) {
+    student.x = student.x + student.speedX;
+    if (student.x + STUDENT_WIDTH / 2 > ROAD_RIGHT || student.x - STUDENT_WIDTH / 2 < ROAD_LEFT) {
+      student.speedX = -student.speedX;
+    }
+  }
+
   // 1초(1000밀리초)가 지났으면 남은 시간을 1 줄인다 (0에서 멈춘다)
   // 프레임 수를 세지 않고 실제 시계로 재므로, 화면이 빠른 기기에서도 똑같이 1초다
   if (Date.now() - lastSecondTime >= 1000 && timeLeft > 0) {
@@ -168,9 +191,10 @@ function gameLoop() {
     ctx.drawImage(treeImage, tree.x, tree.y, TREE_SIZE, TREE_SIZE);
   }
 
-  // ----- 자동차 -----
-  // 건물보다 먼저 그려야, 위에서 다시 나타날 때 건물 뒤에서 나오는 것처럼 보인다
+  // ----- 자동차 2대 -----
+  // 건물보다 먼저 그려야, 위에서 나타나거나 사라질 때 건물 뒤로 지나가는 것처럼 보인다
   ctx.drawImage(carImage, CAR_X, carY, CAR_WIDTH, CAR_HEIGHT);
+  ctx.drawImage(carImage, CAR2_X, car2Y, CAR_WIDTH, CAR_HEIGHT);
 
   // ----- 6. 강의실 건물 (맨 위) -----
   // 벽돌색 건물 벽
@@ -206,7 +230,7 @@ function gameLoop() {
   ctx.fillText("강의실", DOOR_X + DOOR_WIDTH / 2, DOOR_Y + DOOR_HEIGHT / 2);
 
   // ----- 8. 다른 학생들 -----
-  for (const student of STUDENTS) {
+  for (const student of students) {
     // 이미지는 왼쪽 위 꼭짓점 기준이라, 중심 (x, y)에서 반만큼 빼서 그린다
     ctx.drawImage(
       studentImage,
@@ -225,7 +249,12 @@ function gameLoop() {
   ctx.fillStyle = "rgba(0, 0, 0, 0.5)";
   ctx.fillRect(310, 10, 180, 36);
 
-  ctx.fillStyle = "#ffffff";
+  // 10초 이하로 남으면 글자를 빨갛게 해서 급하다는 걸 보여 준다
+  if (timeLeft <= 10) {
+    ctx.fillStyle = "#ff4d4d";
+  } else {
+    ctx.fillStyle = "#ffffff";
+  }
   ctx.font = "bold 24px sans-serif";
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
