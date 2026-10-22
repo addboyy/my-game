@@ -46,10 +46,10 @@ const CHAIR_SIZE = 50;
 // 다른 학생: 위에서 본 초록 옷 학생 (x, y는 "중심")
 const STUDENT_WIDTH = 52;
 const STUDENT_HEIGHT = 36;
-// 학생들은 차도 안에서 좌우로 천천히 걷다가 인도에 닿으면 돌아선다
+// 학생들은 두 자동차 차선 사이에서만 좌우로 천천히 걷다가, 차선에 닿기 전에 돌아선다
 // x가 매 프레임 바뀌므로 let. speedX는 한 프레임에 가로로 걷는 양 (양수 = 오른쪽)
 let students = [
-  { x: 250, y: 330, speedX: 1 },
+  { x: 280, y: 330, speedX: 1 },
   { x: 520, y: 240, speedX: -0.7 },
   { x: 420, y: 200, speedX: 0.5 },
 ];
@@ -65,6 +65,11 @@ let carSpeedY = 6;        // 한 프레임에 아래로 6씩 (양수 = 아래, �
 const CAR2_X = 170;       // 왼쪽 차선 위치 (오른쪽 자동차와 대칭)
 let car2Y = 450;          // 자동차 2의 세로 위치
 let car2SpeedY = -4;      // 한 프레임에 위로 4씩 (음수 = 위)
+
+// 학생이 걸어 다닐 수 있는 구역: 왼쪽 자동차 차선 오른쪽 ~ 오른쪽 자동차 차선 왼쪽
+// 자동차와 15픽셀 여유를 두어서 학생과 자동차가 절대 겹치지 않는다
+const WALK_LEFT = CAR2_X + CAR_WIDTH + 15;    // 225
+const WALK_RIGHT = CAR_X - 15;                // 575
 
 // 강의실 문: 노란 사각형 + "강의실" 글자 (건물 아래쪽에 붙어 있다)
 const DOOR_X = 340;
@@ -141,10 +146,10 @@ function gameLoop() {
     car2Y = canvas.height;
   }
 
-  // 학생들을 걷는 속도만큼 옮기고, 인도(차도 끝)에 닿으면 방향을 뒤집는다
+  // 학생들을 걷는 속도만큼 옮기고, 걷는 구역 끝(자동차 차선 앞)에 닿으면 방향을 뒤집는다
   for (const student of students) {
     student.x = student.x + student.speedX;
-    if (student.x + STUDENT_WIDTH / 2 > ROAD_RIGHT || student.x - STUDENT_WIDTH / 2 < ROAD_LEFT) {
+    if (student.x + STUDENT_WIDTH / 2 > WALK_RIGHT || student.x - STUDENT_WIDTH / 2 < WALK_LEFT) {
       student.speedX = -student.speedX;
     }
   }
