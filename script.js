@@ -26,6 +26,18 @@ const TREES = [
   { x: 715, y: 450 },
 ];
 
+// 풀 포기: 잔디 위에 바람에 흔들리는 풀잎 묶음 (x, y는 풀 뿌리 위치)
+const GRASS_TUFTS = [
+  { x: 25, y: 125 }, { x: 65, y: 240 }, { x: 20, y: 300 }, { x: 70, y: 450 },
+  { x: 30, y: 520 }, { x: 65, y: 590 }, { x: 45, y: 280 }, { x: 15, y: 590 },
+  { x: 740, y: 140 }, { x: 780, y: 200 }, { x: 735, y: 360 }, { x: 775, y: 410 },
+  { x: 750, y: 570 }, { x: 785, y: 595 }, { x: 725, y: 215 }, { x: 790, y: 330 },
+];
+const GRASS_BLADE_HEIGHT = 18;   // 풀잎 길이
+const GRASS_SWAY = 4;            // 풀잎 끝이 좌우로 흔들리는 최대 거리
+let swayTime = 0;                // 흔들림 시계: 매 프레임 조금씩 커진다
+const SWAY_SPEED = 0.05;         // 흔들리는 빠르기 (클수록 빨리 흔들린다)
+
 // 플레이어(의자): 50×50, 화면 중간 아래부분
 const CHAIR_X = 375;      // 왼쪽 위 꼭짓점 x
 const CHAIR_Y = 490;      // 왼쪽 위 꼭짓점 y
@@ -118,6 +130,9 @@ function gameLoop() {
     carY = -CAR_HEIGHT;
   }
 
+  // 흔들림 시계를 조금 앞으로 돌린다 (풀잎 흔들림에 쓴다)
+  swayTime = swayTime + SWAY_SPEED;
+
   // 자동차 2를 속도만큼 위로 옮긴다 (속도가 음수라 y가 줄어든다)
   car2Y = car2Y + car2SpeedY;
 
@@ -148,6 +163,23 @@ function gameLoop() {
   ctx.fillStyle = ctx.createPattern(grassImage, "repeat");
   ctx.fillRect(0, 0, GRASS_WIDTH, 600);                  // 왼쪽 잔디
   ctx.fillRect(800 - GRASS_WIDTH, 0, GRASS_WIDTH, 600);  // 오른쪽 잔디
+
+  // 풀 포기: 포기마다 풀잎 3개. 끝부분이 sin(사인) 물결처럼 좌우로 흔들린다
+  // 포기마다 위치를 더해서 흔들리는 타이밍을 다르게 → 바람이 지나가는 것처럼 보인다
+  ctx.strokeStyle = "#2f7d32";
+  ctx.lineWidth = 2;
+  for (const tuft of GRASS_TUFTS) {
+    const sway = Math.sin(swayTime + tuft.x * 0.05 + tuft.y * 0.03) * GRASS_SWAY;
+    for (let i = -1; i <= 1; i++) {
+      const rootX = tuft.x + i * 4;                        // 풀잎 뿌리 (4픽셀 간격)
+      const tipX = rootX + i * 3 + sway;                    // 풀잎 끝 (바깥으로 벌어지고 + 흔들림)
+      const tipY = tuft.y - GRASS_BLADE_HEIGHT + Math.abs(i) * 3;   // 가운데 잎이 제일 길다
+      ctx.beginPath();
+      ctx.moveTo(rootX, tuft.y);
+      ctx.quadraticCurveTo(rootX, tuft.y - GRASS_BLADE_HEIGHT / 2, tipX, tipY);   // 살짝 휜 풀잎
+      ctx.stroke();
+    }
+  }
 
   // ----- 2. 인도 (양쪽): 밝은 회색 + 보도블록 줄 -----
   ctx.fillStyle = "#bfbfbf";
@@ -193,7 +225,15 @@ function gameLoop() {
 
   // ----- 자동차 2대 -----
   // 건물보다 먼저 그려야, 위에서 나타나거나 사라질 때 건물 뒤로 지나가는 것처럼 보인다
-  ctx.drawImage(carImage, CAR_X, carY, CAR_WIDTH, CAR_HEIGHT);
+  // 오른쪽 자동차는 아래로 가므로 그림을 180도 돌려서 앞이 아래를 보게 한다
+  // save → 자동차 중심으로 붓을 옮기고 돌린다 → 그린다 → restore로 붓을 원래대로
+  ctx.save();
+  ctx.translate(CAR_X + CAR_WIDTH / 2, carY + CAR_HEIGHT / 2);
+  ctx.rotate(Math.PI);   // Math.PI = 180도
+  ctx.drawImage(carImage, -CAR_WIDTH / 2, -CAR_HEIGHT / 2, CAR_WIDTH, CAR_HEIGHT);
+  ctx.restore();
+
+  // 왼쪽 자동차는 위로 가므로 그림 그대로 그린다
   ctx.drawImage(carImage, CAR2_X, car2Y, CAR_WIDTH, CAR_HEIGHT);
 
   // ----- 6. 강의실 건물 (맨 위) -----
