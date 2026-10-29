@@ -17,7 +17,7 @@ let cameraAngle = 0;                        // 카메라가 바라보는 방향 
 
 // ===== 트랙 (카트라이더 "빌리지 고가의 질주" 느낌: 긴 직선 + 직각 코너 + 헤어핀 + 고가도로) =====
 // 길 가운데 선이 지나가는 꼭짓점들. 출발부터 강의실(결승)까지 순서대로 직선으로 잇고,
-// 꼭짓점마다 모서리를 CORNER_RADIUS만큼 둥글게 깎는다.
+// 꼭짓점마다 모서리를 반지름 CORNER_RADIUS인 원호로 둥글게 깎는다.
 // bridge: true인 점에서 다음 점까지의 직선은 고가도로다 (다른 길 위를 지나간다)
 const TRACK_POINTS = [
   { x: 0, y: 400 },                      // 출발 (출발선 뒤 여유 공간)
@@ -33,7 +33,8 @@ const TRACK_POINTS = [
   { x: 0, y: -5000 },                    // → 위로 직각
   { x: 0, y: -6000 },                    // 강의실 앞 (결승)
 ];
-const CORNER_RADIUS = 350;    // 꼭짓점 모서리를 깎는 길이. 클수록 코너가 완만하다
+const CORNER_RADIUS = 350;    // 코너 원호의 반지름. 클수록 코너가 완만하다
+                              // (길 가운데에서 인도 바깥까지 290보다 커야 코너 안쪽 인도가 접히지 않는다)
 const TRACK_STEP = 8;         // 트랙을 몇 픽셀마다 점으로 나눠 둘지 (작을수록 매끄럽지만 느리다)
 
 // 길 단면: 왼쪽부터 잔디 → 인도 → 차도 → 인도 → 잔디 (전부 길 가운데 선에서 떨어진 거리)
@@ -84,6 +85,11 @@ let chairTrackIndex = 0;      // 가장 가까운 트랙 점 번호
 let chairS = 0;               // 트랙 시작에서 달린 거리 (자동차를 의자 근처에 다시 나타나게 할 때 쓴다)
 let chairOnRoad = true;       // 길(차도·인도) 위인가 (아니면 잔디)
 let chairOnBridge = false;    // 고가도로 위인가 (고가 아래를 지날 때와 그리는 순서가 달라진다)
+
+// 역주행 경고: 트랙 진행 방향과 반대로 움직이는 상태가 잠깐 이어지면 화면에 경고를 띄운다
+const WRONG_WAY_SPEED = 1.5;  // 트랙 반대 방향으로 이 속도보다 빠르게 움직이면 역주행으로 본다
+const WRONG_WAY_DELAY = 30;   // 역주행이 이 프레임 수(30 ≈ 0.5초)만큼 이어지면 경고 (살짝 흔들린 걸로는 안 뜨게)
+let wrongWayFrames = 0;       // 역주행이 몇 프레임째 이어지고 있나
 
 // ===== 조작 설정 (여기 숫자를 바꿔 가며 조작 느낌을 튜닝한다) =====
 const CHAIR_SPEED = 9;        // 이동 속도: 한 프레임에 움직이는 픽셀 수 (최고 속도)
@@ -315,6 +321,15 @@ function gameLoop() {
 
   // 의자가 트랙의 어디쯤인지, 길 위인지, 고가 위인지 알아낸다
   updateChairTrack();
+
+  // 역주행 검사: 의자 속도를 트랙 진행 방향으로 나눠 본다 (내적: 양수 = 앞으로, 음수 = 거꾸로)
+  const track = trackSamples[chairTrackIndex];
+  const forwardSpeed = chairVX * track.tx + chairVY * track.ty;
+  if (forwardSpeed < -WRONG_WAY_SPEED) {
+    wrongWayFrames = wrongWayFrames + 1;
+  } else {
+    wrongWayFrames = 0;
+  }
 
   // 드리프트 연출: 뒷바퀴 자리에 스키드 마크와 연기를 남긴다
   if (isDrifting) {
@@ -595,6 +610,22 @@ function gameLoop() {
   // ----- 미니맵 (화면 오른쪽 위) -----
   drawMinimap();
 
+  // ----- 역주행 경고 (화면 가운데 위): 0.6초 주기로 깜빡인다 -----
+  if (wrongWayFrames > WRONG_WAY_DELAY && Date.now() % 600 < 400) {
+    ctx.fillStyle = "rgba(200, 0, 0, 0.75)";
+    ctx.fillRect(SCREEN_WIDTH / 2 - 150, 70, 300, 60);
+    ctx.strokeStyle = "#ffffff";
+    ctx.lineWidth = 3;
+    ctx.strokeRect(SCREEN_WIDTH / 2 - 150, 70, 300, 60);
+    ctx.fillStyle = "#ffffff";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.font = "bold 26px sans-serif";
+    ctx.fillText("⚠ 역주행 중!", SCREEN_WIDTH / 2, 92);
+    ctx.font = "13px sans-serif";
+    ctx.fillText("강의실은 반대 방향이에요", SCREEN_WIDTH / 2, 116);
+  }
+
   // ----- 12. 글자: 남은 시간 (화면 위 가운데) -----
   // 글자가 잘 보이게 뒤에 반투명 검은 띠를 깐다 (커지는 글자가 들어가게 넉넉히)
   ctx.fillStyle = "rgba(0, 0, 0, 0.5)";
@@ -645,7 +676,7 @@ function gameLoop() {
 }
 
 // ===== 트랙 만들기: TRACK_POINTS를 TRACK_STEP 간격의 점들로 나눈다 (시작할 때 한 번) =====
-// 꼭짓점과 꼭짓점 사이는 직선, 꼭짓점 근처는 모서리를 깎은 곡선(2차 베지어)으로 잇는다
+// 꼭짓점과 꼭짓점 사이는 직선, 꼭짓점 근처는 반지름 CORNER_RADIUS인 원호로 잇는다
 function buildTrack() {
   const samples = [];
 
@@ -659,39 +690,65 @@ function buildTrack() {
     samples.push({ x: x, y: y, s: s, tx: 0, ty: -1, bridge: bridge });
   }
 
+  // i번째 점에서 i+1번째 점으로 가는 방향 (길이 1)
+  function direction(i) {
+    const a = TRACK_POINTS[i];
+    const b = TRACK_POINTS[i + 1];
+    const length = Math.hypot(b.x - a.x, b.y - a.y);
+    return { x: (b.x - a.x) / length, y: (b.y - a.y) / length };
+  }
+
+  // 꼭짓점 i에서 꺾이는 각도 (0 = 직진, π/2 = 직각). 처음과 마지막 점은 꺾이지 않는다
+  function turnAngle(i) {
+    if (i <= 0 || i >= TRACK_POINTS.length - 1) return 0;
+    const inDir = direction(i - 1);
+    const outDir = direction(i);
+    const dot = inDir.x * outDir.x + inDir.y * outDir.y;
+    return Math.acos(Math.max(-1, Math.min(1, dot)));
+  }
+
+  // 꼭짓점 i의 원호가 시작되는 곳이 꼭짓점에서 얼마나 떨어져 있나 (직각이면 반지름과 같다)
+  function cornerCut(i) {
+    return CORNER_RADIUS * Math.tan(turnAngle(i) / 2);
+  }
+
   const n = TRACK_POINTS.length;
   for (let i = 0; i < n - 1; i++) {
     const a = TRACK_POINTS[i];
     const b = TRACK_POINTS[i + 1];
     const length = Math.hypot(b.x - a.x, b.y - a.y);
-    const dirX = (b.x - a.x) / length;
-    const dirY = (b.y - a.y) / length;
+    const dir = direction(i);
 
-    // 직선 부분: 처음과 끝 꼭짓점이 아니면 양쪽 끝을 CORNER_RADIUS만큼 남겨 둔다 (그 자리는 곡선이 차지한다)
-    const startCut = i === 0 ? 0 : CORNER_RADIUS;
-    const endCut = i === n - 2 ? 0 : CORNER_RADIUS;
-    for (let d = startCut; d <= length - endCut; d += TRACK_STEP) {
-      addSample(a.x + dirX * d, a.y + dirY * d, a.bridge === true);
+    // 직선 부분: 양쪽 끝에서 원호가 차지할 만큼은 남겨 둔다
+    // 끝점은 넣지 않는다 (바로 이어지는 원호의 첫 점과 같은 자리라 겹치면 거리 0인 구간이 생긴다)
+    for (let d = cornerCut(i); d < length - cornerCut(i + 1); d += TRACK_STEP) {
+      addSample(a.x + dir.x * d, a.y + dir.y * d, a.bridge === true);
     }
 
-    // 꼭짓점 b의 모서리 곡선: 들어오는 직선 끝 → b 근처 → 나가는 직선 시작
+    // 꼭짓점 b의 원호
     if (i < n - 2) {
-      const c = TRACK_POINTS[i + 2];
-      const nextLength = Math.hypot(c.x - b.x, c.y - b.y);
-      const fromX = b.x - dirX * CORNER_RADIUS;
-      const fromY = b.y - dirY * CORNER_RADIUS;
-      const toX = b.x + (c.x - b.x) / nextLength * CORNER_RADIUS;
-      const toY = b.y + (c.y - b.y) / nextLength * CORNER_RADIUS;
-      const steps = Math.ceil((CORNER_RADIUS * 1.6) / TRACK_STEP);
-      for (let k = 1; k < steps; k++) {
-        const t = k / steps;
-        // 2차 베지어: 시작점, 조절점(꼭짓점), 끝점을 t 비율로 섞는다
-        const x = (1 - t) * (1 - t) * fromX + 2 * (1 - t) * t * b.x + t * t * toX;
-        const y = (1 - t) * (1 - t) * fromY + 2 * (1 - t) * t * b.y + t * t * toY;
-        addSample(x, y, false);
+      const outDir = direction(i + 1);
+      const turn = turnAngle(i + 1);
+      // 오른쪽으로 꺾는가 왼쪽으로 꺾는가 (두 방향의 외적: 양수 = 오른쪽)
+      const sign = dir.x * outDir.y - dir.y * outDir.x > 0 ? 1 : -1;
+      // 원호 시작점: 꼭짓점에서 들어오던 방향으로 cornerCut만큼 앞
+      const startX = b.x - dir.x * cornerCut(i + 1);
+      const startY = b.y - dir.y * cornerCut(i + 1);
+      // 원의 중심: 시작점에서 꺾는 쪽 옆으로 반지름만큼 (진행 방향의 오른쪽 옆 = (-dir.y, dir.x))
+      const centerX = startX - dir.y * sign * CORNER_RADIUS;
+      const centerY = startY + dir.x * sign * CORNER_RADIUS;
+      const startAngle = Math.atan2(startY - centerY, startX - centerX);
+      const steps = Math.ceil((CORNER_RADIUS * turn) / TRACK_STEP);   // 원호 길이 / 점 간격
+      for (let k = 0; k < steps; k++) {
+        const angle = startAngle + sign * turn * (k / steps);
+        addSample(centerX + Math.cos(angle) * CORNER_RADIUS, centerY + Math.sin(angle) * CORNER_RADIUS, false);
       }
     }
   }
+
+  // 마지막 꼭짓점(결승)은 위 반복에서 빠지므로 따로 넣는다
+  const last = TRACK_POINTS[n - 1];
+  addSample(last.x, last.y, false);
 
   // 각 점의 진행 방향(길이 1인 방향 벡터): 앞뒤 점을 잇는 방향
   for (let i = 0; i < samples.length; i++) {
@@ -716,15 +773,18 @@ function pointAt(s) {
     if (trackSamples[mid].s < s) low = mid;
     else high = mid;
   }
-  // 두 점 사이를 비율대로 섞는다
+  // 두 점 사이를 비율대로 섞는다. 진행 방향도 섞어야 코너에서 인도 위의 학생이 튀지 않는다
   const a = trackSamples[low];
   const b = trackSamples[high];
   const t = (s - a.s) / (b.s - a.s);
+  const tx = a.tx + (b.tx - a.tx) * t;
+  const ty = a.ty + (b.ty - a.ty) * t;
+  const length = Math.hypot(tx, ty);   // 섞으면 길이가 1보다 살짝 짧아져서 다시 1로 맞춘다
   return {
     x: a.x + (b.x - a.x) * t,
     y: a.y + (b.y - a.y) * t,
-    tx: a.tx,
-    ty: a.ty,
+    tx: tx / length,
+    ty: ty / length,
     bridge: a.bridge,
   };
 }
