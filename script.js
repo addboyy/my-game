@@ -42,9 +42,9 @@ const TRACK = [
 const TRACK_STEP = 8;         // 길을 그릴 때 몇 픽셀마다 점을 찍어 이을지 (작을수록 매끄럽지만 느리다)
 
 // 길 단면: 왼쪽부터 잔디 → 인도 → 차도 → 인도 → 잔디 (전부 길 가운데 선에서 떨어진 거리)
-const ROAD_HALF = 160;        // 차도 반폭 (차도 전체 폭 320)
+const ROAD_HALF = 230;        // 차도 반폭 (차도 전체 폭 460)
 const SIDEWALK_WIDTH = 60;    // 양쪽 인도 폭 (학생 어깨 폭 52가 들어가게)
-const LANE_OFFSET = 80;       // 자동차 차선 가운데가 길 가운데 선에서 떨어진 거리
+const LANE_OFFSET = 115;      // 자동차 차선 가운데가 길 가운데 선에서 떨어진 거리
 const GRASS_SPEED_RATE = 0.5; // 잔디 위에서는 최고 속도가 이 비율로 줄어든다 (길을 벗어나면 느려진다)
 
 // 강의실 건물: 맵 맨 위 끝
@@ -78,7 +78,7 @@ let chairX = 375;
 let chairY = WORLD_HEIGHT - 110;
 
 // ===== 조작 설정 (여기 숫자를 바꿔 가며 조작 느낌을 튜닝한다) =====
-const CHAIR_SPEED = 6;        // 이동 속도: 한 프레임에 움직이는 픽셀 수 (최고 속도)
+const CHAIR_SPEED = 9;        // 이동 속도: 한 프레임에 움직이는 픽셀 수 (최고 속도)
 const GRIP = 0.25;            // 평소 접지력 (0~1): 클수록 키를 누른 방향으로 바로 꺾이고 바로 선다
 const DRIFT_GRIP = 0.03;      // Shift 드리프트 중 접지력: 작을수록 관성이 커서 옆으로 오래 미끄러진다
 const TURN_RATE = 0.05;       // ← → 키로 한 프레임에 도는 각도 (라디안, 0.05 ≈ 3도)
@@ -128,10 +128,10 @@ const CAR_WIDTH = 40;
 const CAR_HEIGHT = 70;
 // 자동차 1: 오른쪽 차선을 따라 아래로 내려간다
 let carY = WORLD_HEIGHT - 300;   // 자동차의 세로 위치 (매 프레임 바뀐다)
-let carSpeedY = 6;        // 한 프레임에 아래로 6씩 (양수 = 아래, 음수 = 위)
+let carSpeedY = 9;        // 한 프레임에 아래로 9씩 (양수 = 아래, 음수 = 위)
 // 자동차 2: 왼쪽 차선을 따라 위로 올라간다 (반대 방향, 다른 속도)
 let car2Y = WORLD_HEIGHT - 150;  // 자동차 2의 세로 위치
-let car2SpeedY = -4;      // 한 프레임에 위로 4씩 (음수 = 위)
+let car2SpeedY = -6;      // 한 프레임에 위로 6씩 (음수 = 위)
 
 // 자동차 전조등: 자동차 앞쪽으로 뻗는 노란 반투명 빛
 const HEADLIGHT_LENGTH = 45;  // 빛이 뻗는 길이
