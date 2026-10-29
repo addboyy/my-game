@@ -6,15 +6,16 @@ const ctx = canvas.getContext("2d");             // 그 도화지에 그릴 "붓
 
 // ===== 맵과 카메라 (스크롤) =====
 // 맵은 화면보다 세로로 길다. 아래 좌표들은 전부 "맵 위의 좌표"다 (맵 맨 위 = 0, 강의실이 있는 곳).
-// 화면은 맵의 일부만 비추는 카메라이고, 의자를 상하좌우로 따라다닌다.
+// 화면은 맵의 일부만 비추는 카메라다. 카메라는 의자 뒤에 붙어서, 의자가 도는 대로 같이 돈다 (추격 시점).
 const SCREEN_WIDTH = 800;
 const SCREEN_HEIGHT = 600;
 const WORLD_LEFT = -400;                    // 맵 왼쪽 끝 x (화면 폭 바깥으로 400 더 넓다)
 const WORLD_RIGHT = 1200;                   // 맵 오른쪽 끝 x
 const WORLD_HEIGHT = SCREEN_HEIGHT * 12;    // 맵 전체 세로 길이 (화면 12장 = 7200)
-const CAMERA_FOLLOW_Y = 380;                // 스크롤 중에 의자가 머무르는 화면 속 높이
-let cameraX = 0;                            // 카메라가 비추는 맨 왼쪽의 맵 x
-let cameraY = WORLD_HEIGHT - SCREEN_HEIGHT; // 카메라가 비추는 맨 위의 맵 y (처음엔 맵 맨 아래 화면)
+const CAMERA_ANCHOR_Y = 430;                // 의자가 화면에서 머무르는 높이 (가로는 한가운데). 아래쪽이라 앞이 넓게 보인다
+const CAMERA_TURN_FOLLOW = 0.08;            // 카메라가 의자 방향을 따라 도는 빠르기 (0~1). 작을수록 늦게, 부드럽게 따라 돈다
+const VIEW_RADIUS = 650;                    // 화면이 돌아가도 보일 수 있는 의자 주변 범위 (이 밖은 그리지 않는다)
+let cameraAngle = 0;                        // 카메라가 바라보는 방향 (0 = 맵 위쪽)
 
 // ===== 트랙 (구불구불한 캠퍼스 도로) =====
 // 길 가운데 선의 x 위치를 높이(y)마다 정해 둔 점들. 맵 맨 아래(출발)에서 맨 위(강의실) 순서
@@ -79,15 +80,15 @@ let chairY = WORLD_HEIGHT - 110;
 const CHAIR_SPEED = 6;        // 이동 속도: 한 프레임에 움직이는 픽셀 수 (최고 속도)
 const GRIP = 0.25;            // 평소 접지력 (0~1): 클수록 키를 누른 방향으로 바로 꺾이고 바로 선다
 const DRIFT_GRIP = 0.03;      // Shift 드리프트 중 접지력: 작을수록 관성이 커서 옆으로 오래 미끄러진다
-const TURN_SPEED = 0.2;       // 의자가 가는 방향으로 몸을 돌리는 빠르기 (0~1)
+const TURN_RATE = 0.05;       // ← → 키로 한 프레임에 도는 각도 (라디안, 0.05 ≈ 3도)
+const REVERSE_SPEED_RATE = 0.5;  // ↓ 키로 뒤로 갈 때는 최고 속도의 이 비율만큼만
 
 let chairVX = 0;              // 의자의 지금 가로 속도 (양수 = 오른쪽)
 let chairVY = 0;              // 의자의 지금 세로 속도 (양수 = 아래)
 let chairAngle = 0;           // 의자가 바라보는 방향 (0 = 위쪽, 단위는 라디안)
 
 // ===== 드리프트 연출 =====
-const DRIFT_OVERSTEER = 0.6;  // 드리프트 중 몸통이 꺾는 방향보다 더 돌아가는 각도 (0.6 ≈ 35도). 클수록 꽁무니가 많이 빠진다
-const DRIFT_TURN_SPEED = 0.3; // 드리프트 중 몸을 돌리는 빠르기 (평소보다 빨리 휙 돈다)
+const DRIFT_TURN_RATE = 0.08; // 드리프트 중에는 더 빨리 돈다 → 몸은 휙 돌고 몸통은 원래 방향으로 미끄러진다
 const DRIFT_MIN_SPEED = 1.5;  // 이 속도보다 느리면 드리프트 연출(자국, 연기)을 하지 않는다
 let isDrifting = false;       // 지금 드리프트로 미끄러지는 중인가 (연출을 켜고 끄는 데 쓴다)
 
@@ -229,58 +230,49 @@ function gameLoop() {
 
   // 의자 조작 (방식 B): 지금 눌려 있는 키를 보고 움직인다
   if (CONTROL_METHOD === "B") {
-    // 1) 눌린 방향키로 "가고 싶은 방향"을 정한다 (-1, 0, 1)
-    //    두 키를 같이 누르면 두 줄이 다 실행되므로 대각선이 된다
-    let moveX = 0;
-    let moveY = 0;
-    if (keys["ArrowLeft"]) moveX = moveX - 1;
-    if (keys["ArrowRight"]) moveX = moveX + 1;
-    if (keys["ArrowUp"]) moveY = moveY - 1;
-    if (keys["ArrowDown"]) moveY = moveY + 1;
+    // 1) 눌린 방향키 읽기: ↑↓는 앞뒤(throttle), ←→는 핸들(steer)
+    //    두 키를 같이 누르면 두 줄이 다 실행되므로, 앞으로 가면서 꺾을 수 있다
+    let throttle = 0;   // 1 = 앞으로, -REVERSE_SPEED_RATE = 뒤로, 0 = 안 누름
+    let steer = 0;      // -1 = 왼쪽으로 꺾기, 1 = 오른쪽으로 꺾기
+    if (keys["ArrowUp"]) throttle = 1;
+    if (keys["ArrowDown"]) throttle = -REVERSE_SPEED_RATE;
+    if (keys["ArrowLeft"]) steer = steer - 1;
+    if (keys["ArrowRight"]) steer = steer + 1;
 
-    // 2) Shift를 누르고 있으면 드리프트: 접지력이 약해져서 미끄러진다
+    // 2) Shift를 누르고 있으면 드리프트: 접지력이 약해져서 미끄러지고, 핸들은 더 잘 돈다
     let grip = GRIP;
+    let turnRate = TURN_RATE;
     if (keys["Shift"]) {
       grip = DRIFT_GRIP;
+      turnRate = DRIFT_TURN_RATE;
     }
 
-    // 3) 길(차도·인도)을 벗어나 잔디 위에 있으면 최고 속도가 줄어든다
+    // 3) 핸들: 의자가 바라보는 방향을 돌린다 (바퀴 달린 의자라 제자리에서도 돈다)
+    chairAngle = chairAngle + steer * turnRate;
+
+    // 4) 길(차도·인도)을 벗어나 잔디 위에 있으면 최고 속도가 줄어든다
     let maxSpeed = CHAIR_SPEED;
     if (isOnGrass(chairX + CHAIR_SIZE / 2, chairY + CHAIR_SIZE / 2)) {
       maxSpeed = CHAIR_SPEED * GRASS_SPEED_RATE;
     }
 
-    // 4) 지금 속도가 목표 속도(방향 × 최고 속도)를 grip 비율만큼만 따라간다
-    //    grip이 크면 금방 따라가서 바로 꺾이고, 작으면 원래 가던 쪽으로 계속 미끄러진다 (관성)
-    chairVX = chairVX + (moveX * maxSpeed - chairVX) * grip;
-    chairVY = chairVY + (moveY * maxSpeed - chairVY) * grip;
+    // 5) 목표 속도 = 의자가 바라보는 방향 × 최고 속도 × throttle
+    //    각도 0이 위쪽이라, 바라보는 방향의 가로 성분은 sin, 세로 성분은 -cos이다
+    const targetVX = Math.sin(chairAngle) * maxSpeed * throttle;
+    const targetVY = -Math.cos(chairAngle) * maxSpeed * throttle;
 
-    // 5) 속도만큼 위치를 옮긴다
+    // 6) 지금 속도가 목표 속도를 grip 비율만큼만 따라간다
+    //    grip이 크면 바라보는 쪽으로 바로 가고, 작으면 원래 가던 쪽으로 계속 미끄러진다 (관성 = 드리프트)
+    chairVX = chairVX + (targetVX - chairVX) * grip;
+    chairVY = chairVY + (targetVY - chairVY) * grip;
+
+    // 7) 속도만큼 위치를 옮긴다
     chairX = chairX + chairVX;
     chairY = chairY + chairVY;
 
-    // 6) 지금 드리프트 중인가: Shift를 누르고 있고, 어느 정도 빠르게 움직이는 중
+    // 8) 지금 드리프트 중인가: Shift를 누르고 있고, 어느 정도 빠르게 움직이는 중
     const speed = Math.hypot(chairVX, chairVY);               // 지금 속력 (가로·세로 속도로 만든 빗변 길이)
     isDrifting = keys["Shift"] && speed > DRIFT_MIN_SPEED;
-
-    // 7) 의자가 방향키 쪽을 바라보게 조금씩 돌린다
-    //    드리프트 중에는 꺾는 쪽으로 DRIFT_OVERSTEER만큼 더 돌아가서 꽁무니가 바깥으로 빠진다 (오버스티어)
-    if (moveX !== 0 || moveY !== 0) {
-      let targetAngle = Math.atan2(moveX, -moveY);             // 방향키 쪽 각도 (위 = 0)
-      let turnSpeed = TURN_SPEED;
-
-      if (isDrifting) {
-        // 실제로 미끄러져 가는 방향과 방향키 방향의 차이로 "어느 쪽으로 꺾는 중인지" 알아낸다
-        const moveAngle = Math.atan2(chairVX, -chairVY);
-        const turn = angleDiff(targetAngle, moveAngle);
-        if (Math.abs(turn) > 0.1) {
-          targetAngle = targetAngle + Math.sign(turn) * DRIFT_OVERSTEER;   // 꺾는 쪽으로 더 돌린다
-        }
-        turnSpeed = DRIFT_TURN_SPEED;
-      }
-
-      chairAngle = chairAngle + angleDiff(targetAngle, chairAngle) * turnSpeed;
-    }
   }
 
   // 드리프트 연출: 뒷바퀴 자리에 스키드 마크와 연기를 남긴다
@@ -335,22 +327,19 @@ function gameLoop() {
     chairVY = 0;
   }
 
-  // 카메라가 의자를 따라간다: 가로는 의자가 화면 한가운데, 세로는 화면 속 CAMERA_FOLLOW_Y 높이에 오게 맞춘다
-  // 단, 맵 끝 바깥은 비추지 않는다
-  cameraX = chairX + CHAIR_SIZE / 2 - SCREEN_WIDTH / 2;
-  if (cameraX < WORLD_LEFT) cameraX = WORLD_LEFT;
-  if (cameraX > WORLD_RIGHT - SCREEN_WIDTH) cameraX = WORLD_RIGHT - SCREEN_WIDTH;
-  cameraY = chairY - CAMERA_FOLLOW_Y;
-  if (cameraY < 0) cameraY = 0;
-  if (cameraY > WORLD_HEIGHT - SCREEN_HEIGHT) cameraY = WORLD_HEIGHT - SCREEN_HEIGHT;
+  // 카메라가 의자 뒤에서 의자가 바라보는 방향으로 천천히 따라 돈다
+  // 한 번에 다 돌지 않고 차이의 일부만 돌아서, 드리프트할 때 화면이 덜덜 떨리지 않고 부드럽게 돈다
+  cameraAngle = cameraAngle + angleDiff(chairAngle, cameraAngle) * CAMERA_TURN_FOLLOW;
+  const chairCenterX = chairX + CHAIR_SIZE / 2;
+  const chairCenterY = chairY + CHAIR_SIZE / 2;
 
   // 자동차를 속도만큼 아래로 옮긴다
   carY = carY + carSpeedY;
 
-  // 지금 화면(카메라) 아래로 완전히 사라지면, 화면 바로 위에서 다시 나타난다
+  // 의자 주변 보이는 범위 아래로 완전히 사라지면, 범위 바로 위에서 다시 나타난다
   // 맵 맨 위에서는 건물 뒤에서 나오는 것처럼 보인다
-  if (carY > cameraY + SCREEN_HEIGHT) {
-    carY = cameraY - CAR_HEIGHT;
+  if (carY > chairCenterY + VIEW_RADIUS) {
+    carY = chairCenterY - VIEW_RADIUS - CAR_HEIGHT;
   }
 
   // 흔들림 시계를 조금 앞으로 돌린다 (풀잎 흔들림에 쓴다)
@@ -359,9 +348,9 @@ function gameLoop() {
   // 자동차 2를 속도만큼 위로 옮긴다 (속도가 음수라 y가 줄어든다)
   car2Y = car2Y + car2SpeedY;
 
-  // 지금 화면(카메라) 위로 완전히 사라지면, 화면 바로 아래에서 다시 나타난다
-  if (car2Y + CAR_HEIGHT < cameraY) {
-    car2Y = cameraY + SCREEN_HEIGHT;
+  // 의자 주변 보이는 범위 위로 완전히 사라지면, 범위 바로 아래에서 다시 나타난다
+  if (car2Y + CAR_HEIGHT < chairCenterY - VIEW_RADIUS) {
+    car2Y = chairCenterY + VIEW_RADIUS;
   }
 
   // 학생들을 인도 위에서 걷는 속도만큼 옮기고, 자기 구간 끝에 닿으면 방향을 뒤집는다
@@ -391,22 +380,27 @@ function gameLoop() {
 
   // ===== ③ 그리기: 바뀐 숫자대로 화면을 그린다 =====
 
-  // 카메라: 맵 전체를 cameraX만큼 왼쪽으로, cameraY만큼 위로 밀어서 그린다
-  // 그러면 맵 위의 (cameraX, cameraY)인 곳이 화면 왼쪽 위(0, 0)에 온다.
+  // 카메라 (추격 시점): 세 단계로 붓을 옮긴다. 아래에서부터 거꾸로 읽으면 이해하기 쉽다
+  //   ③ 의자 중심이 (0, 0)에 오게 맵을 민다
+  //   ② 카메라 각도만큼 맵을 반대로 돌린다 → 의자가 바라보는 쪽이 화면 위쪽이 된다
+  //   ① (0, 0)을 화면 가운데 아래(의자 자리)로 옮긴다
   // 여기부터 restore 전까지는 전부 "맵 위의 좌표"로 그린다
   ctx.save();
-  ctx.translate(-cameraX, -cameraY);
+  ctx.translate(SCREEN_WIDTH / 2, CAMERA_ANCHOR_Y);   // ①
+  ctx.rotate(-cameraAngle);                           // ②
+  ctx.translate(-chairCenterX, -chairCenterY);        // ③
 
   // 지금 화면에 보이는 맵 범위 (보이지 않는 곳은 그리지 않아서 빠르게)
-  const viewTop = cameraY - TRACK_STEP;
-  const viewBottom = cameraY + SCREEN_HEIGHT + TRACK_STEP;
-  const viewLeft = cameraX - TREE_SIZE;
-  const viewRight = cameraX + SCREEN_WIDTH + TREE_SIZE;
+  // 화면이 돌아가 있어서, 의자 주변 VIEW_RADIUS 안은 어느 방향이든 보일 수 있다
+  const viewTop = chairCenterY - VIEW_RADIUS;
+  const viewBottom = chairCenterY + VIEW_RADIUS;
+  const viewLeft = chairCenterX - VIEW_RADIUS;
+  const viewRight = chairCenterX + VIEW_RADIUS;
 
   // ----- 1. 잔디 (화면 전체 바닥) -----
   // [새로 시도] 패턴: 작은 잔디 그림을 타일처럼 반복해서 칠한다. 길은 이 위에 덮어 그린다
   ctx.fillStyle = ctx.createPattern(grassImage, "repeat");
-  ctx.fillRect(cameraX, cameraY, SCREEN_WIDTH, SCREEN_HEIGHT);
+  ctx.fillRect(viewLeft, viewTop, VIEW_RADIUS * 2, VIEW_RADIUS * 2);
 
   // 풀 포기: 포기마다 풀잎 3개. 끝부분이 sin(사인) 물결처럼 좌우로 흔들린다
   // 포기마다 위치를 더해서 흔들리는 타이밍을 다르게 → 바람이 지나가는 것처럼 보인다
@@ -504,11 +498,12 @@ function gameLoop() {
   // ----- 6. 강의실 건물 (맨 위) -----
   // 벽돌색 건물 벽
   ctx.fillStyle = "#9c4a3a";
-  ctx.fillRect(WORLD_LEFT, 0, WORLD_RIGHT - WORLD_LEFT, BUILDING_HEIGHT);
+  // 화면이 돌면 맵 끝 바깥과 건물 뒤쪽도 보이므로, 건물을 바깥까지 넉넉히 칠한다
+  ctx.fillRect(WORLD_LEFT - VIEW_RADIUS, -VIEW_RADIUS, WORLD_RIGHT - WORLD_LEFT + VIEW_RADIUS * 2, BUILDING_HEIGHT + VIEW_RADIUS);
 
   // 건물 지붕 끝선: 아래쪽에 진한 띠
   ctx.fillStyle = "#6e2f24";
-  ctx.fillRect(WORLD_LEFT, BUILDING_HEIGHT - 8, WORLD_RIGHT - WORLD_LEFT, 8);
+  ctx.fillRect(WORLD_LEFT - VIEW_RADIUS, BUILDING_HEIGHT - 8, WORLD_RIGHT - WORLD_LEFT + VIEW_RADIUS * 2, 8);
 
   // 창문: 하늘색 사각형을 일정한 간격으로 (문 자리는 비운다)
   ctx.fillStyle = "#a8dadc";
@@ -569,18 +564,6 @@ function gameLoop() {
   ctx.drawImage(chairImage, -CHAIR_SIZE / 2, -CHAIR_SIZE / 2, CHAIR_SIZE, CHAIR_SIZE);
   ctx.restore();
 
-  // 드리프트 중이면 의자 위에 "DRIFT!" 글자를 띄운다
-  if (isDrifting) {
-    ctx.fillStyle = "#ffd84d";
-    ctx.strokeStyle = "#000000";
-    ctx.lineWidth = 3;
-    ctx.font = "bold italic 16px sans-serif";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.strokeText("DRIFT!", chairX + CHAIR_SIZE / 2, chairY - 12);   // 검은 테두리를 먼저 그려서
-    ctx.fillText("DRIFT!", chairX + CHAIR_SIZE / 2, chairY - 12);     // 어느 배경에서도 잘 보이게
-  }
-
   // ----- 구름 그림자 (땅 위 모든 것 위에, 글자·게이지 아래에) -----
   // 타원 3개를 겹쳐서 뭉게구름 모양을 만든다
   ctx.fillStyle = "rgba(0, 0, 0, 0.12)";
@@ -602,6 +585,19 @@ function gameLoop() {
   // 카메라 끝: 붓을 원래대로 돌린다. 여기부터는 "화면 좌표"로 그린다
   // 남은 시간과 게이지는 스크롤되지 않고 화면에 붙어 있어야 하기 때문이다
   ctx.restore();
+
+  // 드리프트 중이면 의자 위에 "DRIFT!" 글자를 띄운다
+  // 맵이 아니라 화면에 그려야 화면이 돌아가도 글자가 똑바로 보인다. 의자는 항상 화면의 (가운데, CAMERA_ANCHOR_Y) 근처에 있다
+  if (isDrifting) {
+    ctx.fillStyle = "#ffd84d";
+    ctx.strokeStyle = "#000000";
+    ctx.lineWidth = 3;
+    ctx.font = "bold italic 16px sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.strokeText("DRIFT!", SCREEN_WIDTH / 2, CAMERA_ANCHOR_Y - 45);   // 검은 테두리를 먼저 그려서
+    ctx.fillText("DRIFT!", SCREEN_WIDTH / 2, CAMERA_ANCHOR_Y - 45);     // 어느 배경에서도 잘 보이게
+  }
 
   // ----- 11. 글자: 남은 시간 (화면 위 가운데) -----
   // 글자가 잘 보이게 뒤에 반투명 검은 띠를 깐다 (커지는 글자가 들어가게 넉넉히)
