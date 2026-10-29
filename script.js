@@ -13,10 +13,10 @@ const CAMERA_FOLLOW_Y = 380;                // 스크롤 중에 의자가 머무
 let cameraY = WORLD_HEIGHT - SCREEN_HEIGHT; // 카메라가 비추는 맨 위의 맵 y (처음엔 맵 맨 아래 화면)
 
 // 캠퍼스 도로: 왼쪽부터 잔디 → 인도 → 차도 → 인도 → 잔디
-const GRASS_WIDTH = 90;       // 양쪽 잔디 폭
-const SIDEWALK_WIDTH = 40;    // 양쪽 인도 폭
-const ROAD_LEFT = GRASS_WIDTH + SIDEWALK_WIDTH;   // 차도 왼쪽 끝 x (130)
-const ROAD_RIGHT = 800 - ROAD_LEFT;               // 차도 오른쪽 끝 x (670)
+const GRASS_WIDTH = 80;       // 양쪽 잔디 폭
+const SIDEWALK_WIDTH = 60;    // 양쪽 인도 폭 (학생 어깨 폭 52가 들어가게)
+const ROAD_LEFT = GRASS_WIDTH + SIDEWALK_WIDTH;   // 차도 왼쪽 끝 x (140)
+const ROAD_RIGHT = 800 - ROAD_LEFT;               // 차도 오른쪽 끝 x (660)
 
 // 강의실 건물: 화면 맨 위 (맵 맨 위 끝)
 const BUILDING_HEIGHT = 100;
@@ -102,16 +102,20 @@ const keys = {};
 // 다른 학생: 위에서 본 초록 옷 학생 (x, y는 "중심")
 const STUDENT_WIDTH = 52;
 const STUDENT_HEIGHT = 36;
-// 학생들은 두 자동차 차선 사이에서만 좌우로 천천히 걷다가, 차선에 닿기 전에 돌아선다
-// x가 매 프레임 바뀌므로 let. speedX는 한 프레임에 가로로 걷는 양 (양수 = 오른쪽)
+// 학생들은 차도가 아니라 양쪽 인도 위를 따라 위아래로 걷는다 (차는 차도, 사람은 인도)
+const LEFT_WALK_X = GRASS_WIDTH + SIDEWALK_WIDTH / 2;    // 왼쪽 인도 한가운데 x (110)
+const RIGHT_WALK_X = ROAD_RIGHT + SIDEWALK_WIDTH / 2;    // 오른쪽 인도 한가운데 x (690)
+// 학생마다 자기 구간(minY ~ maxY)만 오가다가 끝에 닿으면 돌아선다
+// 구간을 서로 겹치지 않게 나눠서, 좁은 인도에서 학생끼리 부딪혀 겹치지 않는다
+// y가 매 프레임 바뀌므로 let. speedY는 한 프레임에 세로로 걷는 양 (양수 = 아래)
 let students = [
-  { x: 280, y: 330, speedX: 1 },
-  { x: 520, y: 240, speedX: -0.7 },
-  { x: 420, y: 200, speedX: 0.5 },
-  { x: 350, y: 720, speedX: 0.8 },
-  { x: 480, y: 960, speedX: -1 },
-  { x: 300, y: 1180, speedX: 0.6 },
-  { x: 450, y: 1420, speedX: -0.5 },
+  { x: LEFT_WALK_X, y: 250, speedY: 0.6, minY: 150, maxY: 480 },
+  { x: LEFT_WALK_X, y: 800, speedY: -0.8, minY: 580, maxY: 1000 },
+  { x: LEFT_WALK_X, y: 1250, speedY: 0.5, minY: 1100, maxY: 1500 },
+  { x: RIGHT_WALK_X, y: 400, speedY: -0.7, minY: 150, maxY: 420 },
+  { x: RIGHT_WALK_X, y: 650, speedY: 0.9, minY: 520, maxY: 880 },
+  { x: RIGHT_WALK_X, y: 1100, speedY: -0.6, minY: 980, maxY: 1320 },
+  { x: RIGHT_WALK_X, y: 1550, speedY: 0.7, minY: 1420, maxY: 1750 },
 ];
 
 // 자동차: 40×70, 오른쪽 차선을 따라 아래로 내려간다
@@ -126,10 +130,6 @@ const CAR2_X = 170;       // 왼쪽 차선 위치 (오른쪽 자동차와 대칭
 let car2Y = WORLD_HEIGHT - 150;  // 자동차 2의 세로 위치
 let car2SpeedY = -4;      // 한 프레임에 위로 4씩 (음수 = 위)
 
-// 학생이 걸어 다닐 수 있는 구역: 왼쪽 자동차 차선 오른쪽 ~ 오른쪽 자동차 차선 왼쪽
-// 자동차와 15픽셀 여유를 두어서 학생과 자동차가 절대 겹치지 않는다
-const WALK_LEFT = CAR2_X + CAR_WIDTH + 15;    // 225
-const WALK_RIGHT = CAR_X - 15;                // 575
 const STUDENT_WOBBLE = 0.12;  // 걸을 때 몸이 좌우로 흔들리는 각도 (0.12 ≈ 7도)
 
 // 자동차 전조등: 자동차 앞쪽으로 뻗는 노란 반투명 빛
@@ -353,11 +353,11 @@ function gameLoop() {
     car2Y = cameraY + SCREEN_HEIGHT;
   }
 
-  // 학생들을 걷는 속도만큼 옮기고, 걷는 구역 끝(자동차 차선 앞)에 닿으면 방향을 뒤집는다
+  // 학생들을 인도 위에서 걷는 속도만큼 위아래로 옮기고, 자기 구간 끝에 닿으면 방향을 뒤집는다
   for (const student of students) {
-    student.x = student.x + student.speedX;
-    if (student.x + STUDENT_WIDTH / 2 > WALK_RIGHT || student.x - STUDENT_WIDTH / 2 < WALK_LEFT) {
-      student.speedX = -student.speedX;
+    student.y = student.y + student.speedY;
+    if (student.y > student.maxY || student.y < student.minY) {
+      student.speedY = -student.speedY;
     }
   }
 
@@ -528,15 +528,15 @@ function gameLoop() {
 
   // ----- 8. 다른 학생들: 걷는 방향을 보고, 걸음마다 몸이 좌우로 흔들린다 -----
   for (const student of students) {
-    // 학생 그림은 아래쪽을 보고 있다. 오른쪽으로 걸으면 -90도, 왼쪽이면 +90도 돌려서 걷는 쪽을 보게 한다
+    // 학생 그림은 아래쪽을 보고 있다. 아래로 걸으면 그대로, 위로 걸으면 180도 돌려서 걷는 쪽을 보게 한다
     let facing;
-    if (student.speedX > 0) {
-      facing = -Math.PI / 2;
+    if (student.speedY > 0) {
+      facing = 0;
     } else {
-      facing = Math.PI / 2;
+      facing = Math.PI;
     }
-    // 걸음 흔들림: x(걸어온 거리)로 계산하므로 걸을 때만 흔들린다
-    const wobble = Math.sin(student.x * 0.3) * STUDENT_WOBBLE;
+    // 걸음 흔들림: y(걸어온 거리)로 계산하므로 걸을 때만 흔들린다
+    const wobble = Math.sin(student.y * 0.3) * STUDENT_WOBBLE;
 
     ctx.save();
     ctx.translate(student.x, student.y);   // 학생 중심으로 붓을 옮긴다
