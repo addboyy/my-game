@@ -8,39 +8,52 @@ const ctx = canvas.getContext("2d");             // 그 도화지에 그릴 "붓
 // 맵은 화면보다 세로로 길다. 아래 좌표들은 전부 "맵 위의 좌표"다 (맵 맨 위 = 0, 강의실이 있는 곳).
 // 화면은 맵의 일부만 비추는 카메라이고, 의자가 위로 가면 카메라도 따라 올라간다.
 const SCREEN_HEIGHT = 600;
-const WORLD_HEIGHT = SCREEN_HEIGHT * 3;     // 맵 전체 세로 길이 (화면 3장 = 1800)
+const WORLD_HEIGHT = SCREEN_HEIGHT * 12;    // 맵 전체 세로 길이 (화면 12장 = 7200)
 const CAMERA_FOLLOW_Y = 380;                // 스크롤 중에 의자가 머무르는 화면 속 높이
 let cameraY = WORLD_HEIGHT - SCREEN_HEIGHT; // 카메라가 비추는 맨 위의 맵 y (처음엔 맵 맨 아래 화면)
 
-// 캠퍼스 도로: 왼쪽부터 잔디 → 인도 → 차도 → 인도 → 잔디
-const GRASS_WIDTH = 80;       // 양쪽 잔디 폭
-const SIDEWALK_WIDTH = 60;    // 양쪽 인도 폭 (학생 어깨 폭 52가 들어가게)
-const ROAD_LEFT = GRASS_WIDTH + SIDEWALK_WIDTH;   // 차도 왼쪽 끝 x (140)
-const ROAD_RIGHT = 800 - ROAD_LEFT;               // 차도 오른쪽 끝 x (660)
+// ===== 트랙 (구불구불한 캠퍼스 도로) =====
+// 길 가운데 선의 x 위치를 높이(y)마다 정해 둔 점들. 맵 맨 아래(출발)에서 맨 위(강의실) 순서
+// 점과 점 사이는 부드럽게 이어진다. y 간격이 짧은데 x 차이가 크면 급커브가 된다
+const TRACK = [
+  { y: 7200, x: 400 },
+  { y: 6600, x: 400 },   // 출발 직선
+  { y: 6000, x: 520 },   // 완만한 S자 커브
+  { y: 5400, x: 290 },
+  { y: 5000, x: 290 },
+  { y: 4640, x: 530 },   // 오른쪽 급커브
+  { y: 4200, x: 530 },
+  { y: 3600, x: 310 },   // 완만한 S자 커브
+  { y: 3000, x: 500 },
+  { y: 2700, x: 500 },
+  { y: 2340, x: 260 },   // 왼쪽 급커브
+  { y: 1900, x: 260 },
+  { y: 1400, x: 470 },   // 마지막 S자 커브
+  { y: 950, x: 330 },
+  { y: 600, x: 400 },
+  { y: 0, x: 400 },      // 강의실 앞 직선
+];
+const TRACK_STEP = 8;         // 길을 그릴 때 몇 픽셀마다 점을 찍어 이을지 (작을수록 매끄럽지만 느리다)
 
-// 강의실 건물: 화면 맨 위 (맵 맨 위 끝)
+// 길 단면: 왼쪽부터 잔디 → 인도 → 차도 → 인도 → 잔디 (전부 길 가운데 선에서 떨어진 거리)
+const ROAD_HALF = 160;        // 차도 반폭 (차도 전체 폭 320)
+const SIDEWALK_WIDTH = 60;    // 양쪽 인도 폭 (학생 어깨 폭 52가 들어가게)
+const LANE_OFFSET = 80;       // 자동차 차선 가운데가 길 가운데 선에서 떨어진 거리
+const GRASS_SPEED_RATE = 0.5; // 잔디 위에서는 최고 속도가 이 비율로 줄어든다 (길을 벗어나면 느려진다)
+
+// 강의실 건물: 맵 맨 위 끝
 const BUILDING_HEIGHT = 100;
 
 // 횡단보도: 건물 바로 앞
 const CROSSWALK_Y = 120;
 const CROSSWALK_HEIGHT = 40;
 
-// 나무: 잔디 위 (이미지의 왼쪽 위 꼭짓점 좌표). 나무와 풀은 화면 한 장 분량을 맵 전체에 반복해서 그린다
+// 나무와 풀: 시작할 때 잔디 위 빈자리에 자동으로 배치한다 (아래 placeScenery 함수)
 const TREE_SIZE = 80;
-const TREES = [
-  { x: 5, y: 130 },
-  { x: 5, y: 330 },
-  { x: 715, y: 230 },
-  { x: 715, y: 450 },
-];
-
-// 풀 포기: 잔디 위에 바람에 흔들리는 풀잎 묶음 (x, y는 풀 뿌리 위치)
-const GRASS_TUFTS = [
-  { x: 25, y: 125 }, { x: 65, y: 240 }, { x: 20, y: 300 }, { x: 70, y: 450 },
-  { x: 30, y: 520 }, { x: 65, y: 590 }, { x: 45, y: 280 }, { x: 15, y: 590 },
-  { x: 740, y: 140 }, { x: 780, y: 200 }, { x: 735, y: 360 }, { x: 775, y: 410 },
-  { x: 750, y: 570 }, { x: 785, y: 595 }, { x: 725, y: 215 }, { x: 790, y: 330 },
-];
+let trees = [];               // { x, y } 이미지의 왼쪽 위 꼭짓점
+let grassTufts = [];          // { x, y } 풀 뿌리 위치
+const TREE_GAP = 170;         // 나무를 놓을 세로 간격
+const TUFT_GAP = 40;          // 풀 포기를 놓을 세로 간격
 const GRASS_BLADE_HEIGHT = 18;   // 풀잎 길이
 const GRASS_SWAY = 4;            // 풀잎 끝이 좌우로 흔들리는 최대 거리
 let swayTime = 0;                // 흔들림 시계: 매 프레임 조금씩 커진다
@@ -48,17 +61,11 @@ const SWAY_SPEED = 0.05;         // 흔들리는 빠르기 (클수록 빨리 흔
 const TREE_SWAY_ANGLE = 0.04;    // 나무가 좌우로 기우는 최대 각도 (0.04 ≈ 2도)
 
 // 구름 그림자: 하늘의 구름이 땅에 드리운 반투명 그림자가 천천히 가로지른다
-// x가 매 프레임 바뀌므로 let. size는 크기 배율 (1 = 기본)
-let clouds = [
-  { x: -100, y: 260, speedX: 0.4, size: 1 },
-  { x: 500, y: 470, speedX: 0.25, size: 0.8 },
-  { x: 150, y: 900, speedX: 0.3, size: 0.9 },
-  { x: 600, y: 1300, speedX: 0.35, size: 1 },
-  { x: -50, y: 1550, speedX: 0.2, size: 0.7 },
-];
+// 시작할 때 맵 전체에 화면 한 장마다 하나씩 배치한다. size는 크기 배율 (1 = 기본)
+let clouds = [];
 const CLOUD_RADIUS = 110;        // 구름 그림자 가로 반지름 (size가 1일 때)
 
-// 플레이어(의자): 50×50, 맵 맨 아래 화면의 중간 아래부분에서 출발한다
+// 플레이어(의자): 50×50, 맵 맨 아래 출발 직선에서 출발한다
 // 방향키로 움직이므로 위치는 let (chairX, chairY는 왼쪽 위 꼭짓점)
 const CHAIR_SIZE = 50;
 let chairX = 375;
@@ -102,35 +109,23 @@ const keys = {};
 // 다른 학생: 위에서 본 초록 옷 학생 (x, y는 "중심")
 const STUDENT_WIDTH = 52;
 const STUDENT_HEIGHT = 36;
-// 학생들은 차도가 아니라 양쪽 인도 위를 따라 위아래로 걷는다 (차는 차도, 사람은 인도)
-const LEFT_WALK_X = GRASS_WIDTH + SIDEWALK_WIDTH / 2;    // 왼쪽 인도 한가운데 x (110)
-const RIGHT_WALK_X = ROAD_RIGHT + SIDEWALK_WIDTH / 2;    // 오른쪽 인도 한가운데 x (690)
-// 학생마다 자기 구간(minY ~ maxY)만 오가다가 끝에 닿으면 돌아선다
-// 구간을 서로 겹치지 않게 나눠서, 좁은 인도에서 학생끼리 부딪혀 겹치지 않는다
-// y가 매 프레임 바뀌므로 let. speedY는 한 프레임에 세로로 걷는 양 (양수 = 아래)
-let students = [
-  { x: LEFT_WALK_X, y: 250, speedY: 0.6, minY: 150, maxY: 480 },
-  { x: LEFT_WALK_X, y: 800, speedY: -0.8, minY: 580, maxY: 1000 },
-  { x: LEFT_WALK_X, y: 1250, speedY: 0.5, minY: 1100, maxY: 1500 },
-  { x: RIGHT_WALK_X, y: 400, speedY: -0.7, minY: 150, maxY: 420 },
-  { x: RIGHT_WALK_X, y: 650, speedY: 0.9, minY: 520, maxY: 880 },
-  { x: RIGHT_WALK_X, y: 1100, speedY: -0.6, minY: 980, maxY: 1320 },
-  { x: RIGHT_WALK_X, y: 1550, speedY: 0.7, minY: 1420, maxY: 1750 },
-];
+// 학생들은 차도가 아니라 양쪽 인도 위를 따라 걷는다 (차는 차도, 사람은 인도)
+// 학생마다 자기 구간(minY ~ maxY)만 오가다가 끝에 닿으면 돌아선다. 구간이 겹치지 않아 학생끼리 겹치지 않는다
+// side는 어느 쪽 인도인지 (-1 = 왼쪽, 1 = 오른쪽). x는 길이 휘는 대로 매 프레임 다시 계산한다
+let students = [];
+const STUDENT_GAP = 500;      // 학생을 놓을 세로 간격
+const STUDENT_WALK_RANGE = 260;  // 한 학생이 오가는 구간 길이
+const STUDENT_WOBBLE = 0.12;  // 걸을 때 몸이 좌우로 흔들리는 각도 (0.12 ≈ 7도)
 
-// 자동차: 40×70, 오른쪽 차선을 따라 아래로 내려간다
-const CAR_X = 590;        // 차선 위치 (가로는 움직이지 않는다)
+// 자동차: 40×70, 길을 따라 달린다. 길이 휘면 차도 휘는 방향으로 돌아간다
 const CAR_WIDTH = 40;
 const CAR_HEIGHT = 70;
+// 자동차 1: 오른쪽 차선을 따라 아래로 내려간다
 let carY = WORLD_HEIGHT - 300;   // 자동차의 세로 위치 (매 프레임 바뀐다)
 let carSpeedY = 6;        // 한 프레임에 아래로 6씩 (양수 = 아래, 음수 = 위)
-
 // 자동차 2: 왼쪽 차선을 따라 위로 올라간다 (반대 방향, 다른 속도)
-const CAR2_X = 170;       // 왼쪽 차선 위치 (오른쪽 자동차와 대칭)
 let car2Y = WORLD_HEIGHT - 150;  // 자동차 2의 세로 위치
 let car2SpeedY = -4;      // 한 프레임에 위로 4씩 (음수 = 위)
-
-const STUDENT_WOBBLE = 0.12;  // 걸을 때 몸이 좌우로 흔들리는 각도 (0.12 ≈ 7도)
 
 // 자동차 전조등: 자동차 앞쪽으로 뻗는 노란 반투명 빛
 const HEADLIGHT_LENGTH = 45;  // 빛이 뻗는 길이
@@ -142,7 +137,7 @@ const DOOR_WIDTH = 120;
 const DOOR_HEIGHT = 40;
 
 // 남은 시간 글자: 화면 위 가운데
-let timeLeft = 60;        // 남은 시간(초). 1초마다 1씩 줄어든다
+let timeLeft = 90;        // 남은 시간(초). 1초마다 1씩 줄어든다 (트랙이 길어져서 90초)
 let lastSecondTime = 0;   // 마지막으로 1초를 줄인 시각 (Date.now() 값, 밀리초)
 
 // 부스터 게이지: 화면 아래 가운데
@@ -151,6 +146,9 @@ const GAUGE_Y = 570;
 const GAUGE_WIDTH = 200;
 const GAUGE_HEIGHT = 14;
 const GAUGE_FILL = 0.4;   // 0 = 비어 있음, 1 = 가득 참
+
+// ===== 맵 꾸미기: 나무·풀·학생·구름을 길을 피해서 배치한다 (시작할 때 한 번) =====
+placeScenery();
 
 // ===== 이미지 불러오기 =====
 // 이미지는 불러오는 데 시간이 걸린다.
@@ -242,20 +240,26 @@ function gameLoop() {
       grip = DRIFT_GRIP;
     }
 
-    // 3) 지금 속도가 목표 속도(방향 × 최고 속도)를 grip 비율만큼만 따라간다
-    //    grip이 크면 금방 따라가서 바로 꺾이고, 작으면 원래 가던 쪽으로 계속 미끄러진다 (관성)
-    chairVX = chairVX + (moveX * CHAIR_SPEED - chairVX) * grip;
-    chairVY = chairVY + (moveY * CHAIR_SPEED - chairVY) * grip;
+    // 3) 길(차도·인도)을 벗어나 잔디 위에 있으면 최고 속도가 줄어든다
+    let maxSpeed = CHAIR_SPEED;
+    if (isOnGrass(chairX + CHAIR_SIZE / 2, chairY + CHAIR_SIZE / 2)) {
+      maxSpeed = CHAIR_SPEED * GRASS_SPEED_RATE;
+    }
 
-    // 4) 속도만큼 위치를 옮긴다
+    // 4) 지금 속도가 목표 속도(방향 × 최고 속도)를 grip 비율만큼만 따라간다
+    //    grip이 크면 금방 따라가서 바로 꺾이고, 작으면 원래 가던 쪽으로 계속 미끄러진다 (관성)
+    chairVX = chairVX + (moveX * maxSpeed - chairVX) * grip;
+    chairVY = chairVY + (moveY * maxSpeed - chairVY) * grip;
+
+    // 5) 속도만큼 위치를 옮긴다
     chairX = chairX + chairVX;
     chairY = chairY + chairVY;
 
-    // 5) 지금 드리프트 중인가: Shift를 누르고 있고, 어느 정도 빠르게 움직이는 중
+    // 6) 지금 드리프트 중인가: Shift를 누르고 있고, 어느 정도 빠르게 움직이는 중
     const speed = Math.hypot(chairVX, chairVY);               // 지금 속력 (가로·세로 속도로 만든 빗변 길이)
     isDrifting = keys["Shift"] && speed > DRIFT_MIN_SPEED;
 
-    // 6) 의자가 방향키 쪽을 바라보게 조금씩 돌린다
+    // 7) 의자가 방향키 쪽을 바라보게 조금씩 돌린다
     //    드리프트 중에는 꺾는 쪽으로 DRIFT_OVERSTEER만큼 더 돌아가서 꽁무니가 바깥으로 빠진다 (오버스티어)
     if (moveX !== 0 || moveY !== 0) {
       let targetAngle = Math.atan2(moveX, -moveY);             // 방향키 쪽 각도 (위 = 0)
@@ -353,12 +357,14 @@ function gameLoop() {
     car2Y = cameraY + SCREEN_HEIGHT;
   }
 
-  // 학생들을 인도 위에서 걷는 속도만큼 위아래로 옮기고, 자기 구간 끝에 닿으면 방향을 뒤집는다
+  // 학생들을 인도 위에서 걷는 속도만큼 옮기고, 자기 구간 끝에 닿으면 방향을 뒤집는다
+  // 세로(y)로 걷고, 가로(x)는 그 높이의 인도 한가운데로 맞춘다 → 길이 휘면 학생도 따라 휜다
   for (const student of students) {
     student.y = student.y + student.speedY;
     if (student.y > student.maxY || student.y < student.minY) {
       student.speedY = -student.speedY;
     }
+    student.x = roadCenterX(student.y) + student.side * (ROAD_HALF + SIDEWALK_WIDTH / 2);
   }
 
   // 구름 그림자를 오른쪽으로 천천히 옮기고, 화면 오른쪽 밖으로 나가면 왼쪽 밖에서 다시 들어온다
@@ -384,67 +390,74 @@ function gameLoop() {
   ctx.save();
   ctx.translate(0, -cameraY);
 
-  // ----- 1. 잔디 (양쪽) -----
-  // [새로 시도] 패턴: 작은 잔디 그림을 타일처럼 반복해서 칠한다
+  // 지금 화면에 보이는 맵 범위 (보이지 않는 곳은 그리지 않아서 빠르게)
+  const viewTop = cameraY - TRACK_STEP;
+  const viewBottom = cameraY + SCREEN_HEIGHT + TRACK_STEP;
+
+  // ----- 1. 잔디 (화면 전체 바닥) -----
+  // [새로 시도] 패턴: 작은 잔디 그림을 타일처럼 반복해서 칠한다. 길은 이 위에 덮어 그린다
   ctx.fillStyle = ctx.createPattern(grassImage, "repeat");
-  ctx.fillRect(0, 0, GRASS_WIDTH, WORLD_HEIGHT);                  // 왼쪽 잔디
-  ctx.fillRect(800 - GRASS_WIDTH, 0, GRASS_WIDTH, WORLD_HEIGHT);  // 오른쪽 잔디
+  ctx.fillRect(0, cameraY, 800, SCREEN_HEIGHT);
 
   // 풀 포기: 포기마다 풀잎 3개. 끝부분이 sin(사인) 물결처럼 좌우로 흔들린다
   // 포기마다 위치를 더해서 흔들리는 타이밍을 다르게 → 바람이 지나가는 것처럼 보인다
-  // 화면 한 장 분량의 풀 배치를 맵 아래쪽으로 화면 높이만큼씩 내려가며 반복한다
   ctx.strokeStyle = "#2f7d32";
   ctx.lineWidth = 2;
-  for (let screenTop = 0; screenTop < WORLD_HEIGHT; screenTop += SCREEN_HEIGHT) {
-    for (const tuft of GRASS_TUFTS) {
-      const tuftY = screenTop + tuft.y;
-      const sway = Math.sin(swayTime + tuft.x * 0.05 + tuftY * 0.03) * GRASS_SWAY;
-      for (let i = -1; i <= 1; i++) {
-        const rootX = tuft.x + i * 4;                        // 풀잎 뿌리 (4픽셀 간격)
-        const tipX = rootX + i * 3 + sway;                    // 풀잎 끝 (바깥으로 벌어지고 + 흔들림)
-        const tipY = tuftY - GRASS_BLADE_HEIGHT + Math.abs(i) * 3;   // 가운데 잎이 제일 길다
-        ctx.beginPath();
-        ctx.moveTo(rootX, tuftY);
-        ctx.quadraticCurveTo(rootX, tuftY - GRASS_BLADE_HEIGHT / 2, tipX, tipY);   // 살짝 휜 풀잎
-        ctx.stroke();
-      }
+  for (const tuft of grassTufts) {
+    if (tuft.y < viewTop || tuft.y > viewBottom + GRASS_BLADE_HEIGHT) continue;   // 화면 밖이면 건너뛴다
+    const sway = Math.sin(swayTime + tuft.x * 0.05 + tuft.y * 0.03) * GRASS_SWAY;
+    for (let i = -1; i <= 1; i++) {
+      const rootX = tuft.x + i * 4;                        // 풀잎 뿌리 (4픽셀 간격)
+      const tipX = rootX + i * 3 + sway;                    // 풀잎 끝 (바깥으로 벌어지고 + 흔들림)
+      const tipY = tuft.y - GRASS_BLADE_HEIGHT + Math.abs(i) * 3;   // 가운데 잎이 제일 길다
+      ctx.beginPath();
+      ctx.moveTo(rootX, tuft.y);
+      ctx.quadraticCurveTo(rootX, tuft.y - GRASS_BLADE_HEIGHT / 2, tipX, tipY);   // 살짝 휜 풀잎
+      ctx.stroke();
     }
   }
 
-  // ----- 2. 인도 (양쪽): 밝은 회색 + 보도블록 줄 -----
+  // ----- 2. 인도 (양쪽): 밝은 회색 띠 + 보도블록 줄 -----
+  // 인도 바깥 끝부터 반대편 인도 바깥 끝까지 통째로 칠하고, 그 위에 차도를 덮어 그린다
   ctx.fillStyle = "#bfbfbf";
-  ctx.fillRect(GRASS_WIDTH, 0, SIDEWALK_WIDTH, WORLD_HEIGHT);     // 왼쪽 인도
-  ctx.fillRect(ROAD_RIGHT, 0, SIDEWALK_WIDTH, WORLD_HEIGHT);      // 오른쪽 인도
+  fillTrackBand(-(ROAD_HALF + SIDEWALK_WIDTH), ROAD_HALF + SIDEWALK_WIDTH, viewTop, viewBottom);
 
   ctx.strokeStyle = "#a6a6a6";
   ctx.lineWidth = 1;
-  for (let y = 0; y <= WORLD_HEIGHT; y += 40) {
+  for (let y = Math.floor(viewTop / 40) * 40; y <= viewBottom; y += 40) {
+    const center = roadCenterX(y);
     ctx.beginPath();
-    ctx.moveTo(GRASS_WIDTH, y);
-    ctx.lineTo(ROAD_LEFT, y);
-    ctx.moveTo(ROAD_RIGHT, y);
-    ctx.lineTo(800 - GRASS_WIDTH, y);
+    ctx.moveTo(center - ROAD_HALF - SIDEWALK_WIDTH, y);   // 왼쪽 인도
+    ctx.lineTo(center - ROAD_HALF, y);
+    ctx.moveTo(center + ROAD_HALF, y);                    // 오른쪽 인도
+    ctx.lineTo(center + ROAD_HALF + SIDEWALK_WIDTH, y);
     ctx.stroke();
   }
 
   // ----- 3. 차도: 진한 회색 아스팔트 -----
   ctx.fillStyle = "#4d4d4d";
-  ctx.fillRect(ROAD_LEFT, 0, ROAD_RIGHT - ROAD_LEFT, WORLD_HEIGHT);
+  fillTrackBand(-ROAD_HALF, ROAD_HALF, viewTop, viewBottom);
 
-  // 차도 양쪽 흰 실선
+  // 차도 양쪽 흰 실선 (차도 끝에서 6~10픽셀 안쪽)
   ctx.fillStyle = "#ffffff";
-  ctx.fillRect(ROAD_LEFT + 6, 0, 4, WORLD_HEIGHT);
-  ctx.fillRect(ROAD_RIGHT - 10, 0, 4, WORLD_HEIGHT);
+  fillTrackBand(-ROAD_HALF + 6, -ROAD_HALF + 10, viewTop, viewBottom);
+  fillTrackBand(ROAD_HALF - 10, ROAD_HALF - 6, viewTop, viewBottom);
 
-  // 가운데 노란 점선: 횡단보도 아래부터 30 그리고 20 쉬고를 반복
-  ctx.fillStyle = "#f2c200";
-  for (let y = CROSSWALK_Y + CROSSWALK_HEIGHT + 20; y < WORLD_HEIGHT; y += 50) {
-    ctx.fillRect(398, y, 4, 30);
+  // 가운데 노란 점선: 횡단보도 아래부터 30 그리고 20 쉬고를 반복. 길이 휘는 대로 비스듬히 긋는다
+  ctx.strokeStyle = "#f2c200";
+  ctx.lineWidth = 4;
+  const dashStart = CROSSWALK_Y + CROSSWALK_HEIGHT + 20;
+  for (let y = dashStart + Math.max(0, Math.floor((viewTop - dashStart) / 50)) * 50; y < viewBottom; y += 50) {
+    ctx.beginPath();
+    ctx.moveTo(roadCenterX(y), y);
+    ctx.lineTo(roadCenterX(y + 30), y + 30);
+    ctx.stroke();
   }
 
-  // ----- 4. 횡단보도: 흰 줄무늬 -----
+  // ----- 4. 횡단보도: 흰 줄무늬 (강의실 앞 직선 구간) -----
   ctx.fillStyle = "#ffffff";
-  for (let x = ROAD_LEFT + 20; x < ROAD_RIGHT - 20; x += 40) {
+  const crosswalkCenter = roadCenterX(CROSSWALK_Y);
+  for (let x = crosswalkCenter - ROAD_HALF + 20; x < crosswalkCenter + ROAD_HALF - 20; x += 40) {
     ctx.fillRect(x, CROSSWALK_Y, 20, CROSSWALK_HEIGHT);
   }
 
@@ -462,36 +475,20 @@ function gameLoop() {
   ctx.lineCap = "butt";   // 다른 선 그리기에 영향이 없게 원래대로
 
   // ----- 5. 나무 (잔디 위): 풀과 같은 흔들림 시계로 살짝 기울었다 돌아온다 -----
-  // 풀처럼 화면 한 장 분량의 배치를 맵 전체에 반복한다
-  for (let screenTop = 0; screenTop < WORLD_HEIGHT; screenTop += SCREEN_HEIGHT) {
-    for (const tree of TREES) {
-      const treeY = screenTop + tree.y;
-      const angle = Math.sin(swayTime * 0.8 + treeY * 0.02) * TREE_SWAY_ANGLE;
-      ctx.save();
-      ctx.translate(tree.x + TREE_SIZE / 2, treeY + TREE_SIZE / 2);   // 나무 중심으로 붓을 옮긴다
-      ctx.rotate(angle);                                             // 그 자리에서 살짝 돌린다
-      ctx.drawImage(treeImage, -TREE_SIZE / 2, -TREE_SIZE / 2, TREE_SIZE, TREE_SIZE);
-      ctx.restore();
-    }
+  for (const tree of trees) {
+    if (tree.y + TREE_SIZE < viewTop || tree.y > viewBottom) continue;   // 화면 밖이면 건너뛴다
+    const angle = Math.sin(swayTime * 0.8 + tree.y * 0.02) * TREE_SWAY_ANGLE;
+    ctx.save();
+    ctx.translate(tree.x + TREE_SIZE / 2, tree.y + TREE_SIZE / 2);   // 나무 중심으로 붓을 옮긴다
+    ctx.rotate(angle);                                              // 그 자리에서 살짝 돌린다
+    ctx.drawImage(treeImage, -TREE_SIZE / 2, -TREE_SIZE / 2, TREE_SIZE, TREE_SIZE);
+    ctx.restore();
   }
 
-  // ----- 자동차 전조등 -----
-  // 자동차보다 먼저 그려서 빛이 차 밑에서 앞으로 뻗어 나오는 것처럼 보이게 한다
-  drawHeadlights(CAR_X + CAR_WIDTH / 2, carY + CAR_HEIGHT, 1);   // 오른쪽 차: 앞이 아래쪽
-  drawHeadlights(CAR2_X + CAR_WIDTH / 2, car2Y, -1);             // 왼쪽 차: 앞이 위쪽
-
-  // ----- 자동차 2대 -----
+  // ----- 자동차 2대 (전조등 포함) -----
   // 건물보다 먼저 그려야, 위에서 나타나거나 사라질 때 건물 뒤로 지나가는 것처럼 보인다
-  // 오른쪽 자동차는 아래로 가므로 그림을 180도 돌려서 앞이 아래를 보게 한다
-  // save → 자동차 중심으로 붓을 옮기고 돌린다 → 그린다 → restore로 붓을 원래대로
-  ctx.save();
-  ctx.translate(CAR_X + CAR_WIDTH / 2, carY + CAR_HEIGHT / 2);
-  ctx.rotate(Math.PI);   // Math.PI = 180도
-  ctx.drawImage(carImage, -CAR_WIDTH / 2, -CAR_HEIGHT / 2, CAR_WIDTH, CAR_HEIGHT);
-  ctx.restore();
-
-  // 왼쪽 자동차는 위로 가므로 그림 그대로 그린다
-  ctx.drawImage(carImage, CAR2_X, car2Y, CAR_WIDTH, CAR_HEIGHT);
+  drawCar(1, carY, true);      // 오른쪽 차선, 아래로 내려가는 차
+  drawCar(-1, car2Y, false);   // 왼쪽 차선, 위로 올라가는 차
 
   // ----- 6. 강의실 건물 (맨 위) -----
   // 벽돌색 건물 벽
@@ -526,14 +523,13 @@ function gameLoop() {
   ctx.textBaseline = "middle";
   ctx.fillText("강의실", DOOR_X + DOOR_WIDTH / 2, DOOR_Y + DOOR_HEIGHT / 2);
 
-  // ----- 8. 다른 학생들: 걷는 방향을 보고, 걸음마다 몸이 좌우로 흔들린다 -----
+  // ----- 8. 다른 학생들: 인도가 휜 방향을 따라 걷는 쪽을 보고, 걸음마다 몸이 좌우로 흔들린다 -----
   for (const student of students) {
-    // 학생 그림은 아래쪽을 보고 있다. 아래로 걸으면 그대로, 위로 걸으면 180도 돌려서 걷는 쪽을 보게 한다
-    let facing;
-    if (student.speedY > 0) {
-      facing = 0;
-    } else {
-      facing = Math.PI;
+    if (student.y < viewTop - STUDENT_WIDTH || student.y > viewBottom + STUDENT_WIDTH) continue;
+    // 학생 그림은 아래쪽을 보고 있다. 아래로 걸으면 길 기울기만큼만, 위로 걸으면 180도 더 돌린다
+    let facing = Math.atan(-roadSlope(student.y));
+    if (student.speedY < 0) {
+      facing = facing + Math.PI;
     }
     // 걸음 흔들림: y(걸어온 거리)로 계산하므로 걸을 때만 흔들린다
     const wobble = Math.sin(student.y * 0.3) * STUDENT_WOBBLE;
@@ -579,6 +575,7 @@ function gameLoop() {
   ctx.fillStyle = "rgba(0, 0, 0, 0.12)";
   for (const cloud of clouds) {
     const r = CLOUD_RADIUS * cloud.size;
+    if (cloud.y + r < viewTop || cloud.y - r > viewBottom) continue;   // 화면 밖이면 건너뛴다
     // 한 경로에 담아 한 번에 칠해야 겹친 부분이 더 진해지지 않는다
     // moveTo로 각 타원의 시작점(오른쪽 끝)으로 먼저 옮겨야 타원끼리 선으로 이어지지 않는다
     ctx.beginPath();
@@ -641,6 +638,136 @@ function gameLoop() {
 
   // ===== ④ 다음 프레임 예약: 다음 그림 때 gameLoop를 또 불러 달라고 부탁한다 =====
   requestAnimationFrame(gameLoop);
+}
+
+// ===== 트랙: 높이 y에서 길 가운데 선의 x =====
+// TRACK의 두 점 사이에 y가 있으면, 두 점의 x 사이를 부드럽게(코사인 곡선) 이어서 계산한다
+// 그냥 직선으로 이으면 점마다 길이 뚝 꺾이지만, 코사인으로 이으면 휘어지는 시작과 끝이 둥글다
+function roadCenterX(y) {
+  if (y >= TRACK[0].y) return TRACK[0].x;
+  for (let i = 0; i < TRACK.length - 1; i++) {
+    const below = TRACK[i];        // 아래쪽 점 (y가 더 크다)
+    const above = TRACK[i + 1];    // 위쪽 점
+    if (y <= below.y && y >= above.y) {
+      const t = (below.y - y) / (below.y - above.y);       // 아래 점에서 0, 위 점에서 1
+      const smooth = (1 - Math.cos(Math.PI * t)) / 2;      // 0 → 1로 가되 처음과 끝은 천천히
+      return below.x + (above.x - below.x) * smooth;
+    }
+  }
+  return TRACK[TRACK.length - 1].x;
+}
+
+// ===== 트랙: 높이 y에서 길이 얼마나 기울었나 =====
+// 아래로 1픽셀 갈 때 길 가운데가 옆으로 몇 픽셀 움직이는가 (0 = 똑바로 위아래, 1 = 45도)
+function roadSlope(y) {
+  return (roadCenterX(y + 1) - roadCenterX(y - 1)) / 2;
+}
+
+// ===== 이 위치가 잔디 위인가 (차도·인도를 벗어났는가) =====
+function isOnGrass(x, y) {
+  return Math.abs(x - roadCenterX(y)) > ROAD_HALF + SIDEWALK_WIDTH;
+}
+
+// ===== 길을 따라 휘는 띠 하나 칠하기 =====
+// 길 가운데 선에서 fromOffset ~ toOffset만큼 떨어진 띠를, yTop부터 yBottom까지 칠한다
+// 왼쪽 끝을 위에서 아래로 따라 내려간 뒤, 오른쪽 끝을 아래에서 위로 거슬러 올라오면 띠 모양 다각형이 된다
+function fillTrackBand(fromOffset, toOffset, yTop, yBottom) {
+  ctx.beginPath();
+  for (let y = yTop; y <= yBottom; y += TRACK_STEP) {
+    ctx.lineTo(roadCenterX(y) + fromOffset, y);
+  }
+  for (let y = yBottom; y >= yTop; y -= TRACK_STEP) {
+    ctx.lineTo(roadCenterX(y) + toOffset, y);
+  }
+  ctx.closePath();
+  ctx.fill();
+}
+
+// ===== 자동차 그리기 =====
+// side: 1 = 오른쪽 차선, -1 = 왼쪽 차선 / topY: 자동차 위쪽 끝 y / goingDown: 아래로 가는 차인가
+// 자동차는 자기 차선을 따라가고, 길이 휜 만큼 몸을 돌린다
+function drawCar(side, topY, goingDown) {
+  const centerY = topY + CAR_HEIGHT / 2;
+  const centerX = roadCenterX(centerY) + side * LANE_OFFSET;
+  // 자동차 그림은 앞이 위쪽이다. 위로 가는 차는 길 기울기만큼만, 아래로 가는 차는 180도 더 돌린다
+  let angle = Math.atan(-roadSlope(centerY));
+  if (goingDown) {
+    angle = angle + Math.PI;
+  }
+
+  // save → 자동차 중심으로 붓을 옮기고 돌린다 → 그린다 → restore로 붓을 원래대로
+  ctx.save();
+  ctx.translate(centerX, centerY);
+  ctx.rotate(angle);
+  // 돌린 붓 안에서는 자동차 앞이 항상 위쪽이라, 전조등은 앞 범퍼(-CAR_HEIGHT / 2)에서 위로(-1) 뻗는다
+  // 자동차보다 먼저 그려서 빛이 차 밑에서 앞으로 뻗어 나오는 것처럼 보이게 한다
+  drawHeadlights(0, -CAR_HEIGHT / 2, -1);
+  ctx.drawImage(carImage, -CAR_WIDTH / 2, -CAR_HEIGHT / 2, CAR_WIDTH, CAR_HEIGHT);
+  ctx.restore();
+}
+
+// ===== 맵 꾸미기: 나무·풀·학생·구름 배치 (시작할 때 한 번) =====
+// 길은 휘어 있으니 자리를 손으로 정하지 않고, 높이마다 길 바깥 잔디가 얼마나 남는지 재서 놓는다
+function placeScenery() {
+  // 나무: TREE_GAP마다 양쪽 잔디에 하나씩. 나무 높이 전체에서 길과 안 겹치는 자리에만 놓는다
+  for (let y = BUILDING_HEIGHT + 30; y < WORLD_HEIGHT - TREE_SIZE; y += TREE_GAP) {
+    // 나무가 차지하는 높이(위·가운데·아래)에서 길 바깥 끝을 재서, 가장 좁은 곳 기준으로 놓는다
+    let leftSpace = 800;    // 왼쪽 잔디의 오른쪽 끝 x (작을수록 왼쪽 잔디가 좁다)
+    let rightStart = 0;     // 오른쪽 잔디의 왼쪽 끝 x
+    for (const dy of [0, TREE_SIZE / 2, TREE_SIZE]) {
+      const center = roadCenterX(y + dy);
+      leftSpace = Math.min(leftSpace, center - ROAD_HALF - SIDEWALK_WIDTH);
+      rightStart = Math.max(rightStart, center + ROAD_HALF + SIDEWALK_WIDTH);
+    }
+    // 나무는 화면 밖으로 20픽셀까지 걸쳐도 된다. 길과는 8픽셀 띄운다
+    const leftMaxX = leftSpace - 8 - TREE_SIZE;
+    if (leftMaxX >= -20) {
+      trees.push({ x: -20 + Math.random() * (leftMaxX + 20), y: y + Math.random() * 40 });
+    }
+    const rightMinX = rightStart + 8;
+    if (rightMinX <= 820 - TREE_SIZE) {
+      trees.push({ x: rightMinX + Math.random() * (820 - TREE_SIZE - rightMinX), y: y + Math.random() * 40 });
+    }
+  }
+
+  // 풀 포기: TUFT_GAP마다 양쪽 잔디에 하나씩 (잔디가 20픽셀보다 좁으면 건너뛴다)
+  for (let y = BUILDING_HEIGHT + 30; y < WORLD_HEIGHT; y += TUFT_GAP) {
+    const tuftY = y + Math.random() * TUFT_GAP;
+    // 풀잎 뿌리(tuftY)와 끝(tuftY - 풀잎 길이) 두 높이에서 길 바깥 끝을 재서 더 좁은 쪽 기준으로 놓는다
+    const leftEdge = Math.min(roadCenterX(tuftY), roadCenterX(tuftY - GRASS_BLADE_HEIGHT)) - ROAD_HALF - SIDEWALK_WIDTH;
+    const rightEdge = Math.max(roadCenterX(tuftY), roadCenterX(tuftY - GRASS_BLADE_HEIGHT)) + ROAD_HALF + SIDEWALK_WIDTH;
+    if (leftEdge > 30) {
+      grassTufts.push({ x: 8 + Math.random() * (leftEdge - 24), y: tuftY });
+    }
+    if (800 - rightEdge > 30) {
+      grassTufts.push({ x: rightEdge + 16 + Math.random() * (800 - rightEdge - 24), y: tuftY });
+    }
+  }
+
+  // 학생: STUDENT_GAP마다 한 명씩, 왼쪽·오른쪽 인도를 번갈아. 출발 지점 근처는 비워 둔다
+  let side = -1;
+  for (let y = 400; y < WORLD_HEIGHT - 500; y += STUDENT_GAP) {
+    const speed = 0.5 + Math.random() * 0.4;                 // 0.5 ~ 0.9
+    students.push({
+      x: 0,                                                  // x는 게임 루프에서 길을 따라 계산한다
+      y: y + Math.random() * STUDENT_WALK_RANGE,
+      speedY: Math.random() < 0.5 ? speed : -speed,          // 절반은 위로, 절반은 아래로
+      minY: y,
+      maxY: y + STUDENT_WALK_RANGE,
+      side: side,
+    });
+    side = -side;   // 다음 학생은 반대쪽 인도
+  }
+
+  // 구름: 화면 한 장마다 하나씩, 가로 위치·속도·크기는 제각각
+  for (let y = 260; y < WORLD_HEIGHT; y += SCREEN_HEIGHT) {
+    clouds.push({
+      x: Math.random() * 800,
+      y: y + Math.random() * 200,
+      speedX: 0.2 + Math.random() * 0.2,
+      size: 0.7 + Math.random() * 0.3,
+    });
+  }
 }
 
 // ===== 각도 차이 계산 =====
