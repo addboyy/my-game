@@ -47,10 +47,22 @@ let clouds = [
 ];
 const CLOUD_RADIUS = 110;        // 구름 그림자 가로 반지름 (size가 1일 때)
 
-// 플레이어(의자): 50×50, 화면 중간 아래부분
-const CHAIR_X = 375;      // 왼쪽 위 꼭짓점 x
-const CHAIR_Y = 490;      // 왼쪽 위 꼭짓점 y
+// 플레이어(의자): 50×50, 화면 중간 아래부분에서 출발한다
+// 방향키로 움직이므로 위치는 let (chairX, chairY는 왼쪽 위 꼭짓점)
 const CHAIR_SIZE = 50;
+let chairX = 375;
+let chairY = 490;
+
+// ===== 조작 설정 (여기 숫자를 바꿔 가며 조작 느낌을 튜닝한다) =====
+const CHAIR_SPEED = 5;        // 이동 속도: 한 프레임에 움직이는 픽셀 수
+
+// 조작 방식 비교 실험용 스위치 (워크북 5장 Step 2 · Step 3)
+// "A" = keydown 안에서 직접 움직이는 방식 (꾹 누르면 끊기고, 대각선이 안 된다)
+// "B" = keys에 눌린 상태를 기록하고, 게임 루프에서 움직이는 방식 (매끄럽다)
+const CONTROL_METHOD = "B";
+
+// 눌린 키를 적어 두는 메모장: keys["ArrowLeft"]가 true면 지금 왼쪽 키가 눌려 있다
+const keys = {};
 
 // 다른 학생: 위에서 본 초록 옷 학생 (x, y는 "중심")
 const STUDENT_WIDTH = 52;
@@ -132,6 +144,40 @@ studentImage.src = "images/student.png";
 treeImage.src = "images/tree.png";
 grassImage.src = "images/grass.png";
 
+// ===== 키보드 입력 =====
+// 키보드는 canvas가 아니라 document(페이지 전체)에 건다. canvas는 키 입력을 받지 않는다.
+
+// 키를 누르는 순간: "눌렸다"고 적어 둔다
+document.addEventListener("keydown", function (e) {
+  // 방향키·스페이스바로 페이지가 스크롤되어 게임이 흔들리지 않게, 브라우저 기본 동작을 막는다
+  if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", " "].includes(e.key)) {
+    e.preventDefault();
+  }
+
+  if (CONTROL_METHOD === "A") {
+    // 방식 A: 눌릴 때마다 여기서 바로 위치를 바꾼다 (비교 실험용)
+    if (e.key === "ArrowLeft") chairX = chairX - CHAIR_SPEED;
+    if (e.key === "ArrowRight") chairX = chairX + CHAIR_SPEED;
+    if (e.key === "ArrowUp") chairY = chairY - CHAIR_SPEED;
+    if (e.key === "ArrowDown") chairY = chairY + CHAIR_SPEED;
+  } else {
+    // 방식 B: 기록만 한다. 실제로 움직이는 건 게임 루프가 한다
+    keys[e.key] = true;
+  }
+});
+
+// 키에서 손을 떼는 순간: "떼었다"고 적어 둔다
+document.addEventListener("keyup", function (e) {
+  keys[e.key] = false;
+});
+
+// 다른 창을 누르면 keyup이 안 들어와서 키가 계속 눌린 걸로 남는다 → 전부 뗀 것으로 지운다
+window.addEventListener("blur", function () {
+  for (const key in keys) {
+    keys[key] = false;
+  }
+});
+
 // ===== 게임 루프: 지우기 → 계산 → 그리기 → 다음 프레임 예약 =====
 
 function gameLoop() {
@@ -139,6 +185,23 @@ function gameLoop() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
   // ===== ② 계산: 상태(숫자)를 바꾼다 =====
+
+  // 의자 조작 (방식 B): 지금 눌려 있는 키를 보고 움직인다
+  // 두 키를 같이 누르면 두 줄이 다 실행되므로 대각선으로 간다
+  if (CONTROL_METHOD === "B") {
+    if (keys["ArrowLeft"]) chairX = chairX - CHAIR_SPEED;
+    if (keys["ArrowRight"]) chairX = chairX + CHAIR_SPEED;
+    if (keys["ArrowUp"]) chairY = chairY - CHAIR_SPEED;
+    if (keys["ArrowDown"]) chairY = chairY + CHAIR_SPEED;
+  }
+
+  // 의자가 화면 밖으로 나가지 않게 네 벽에서 막는다
+  // 오른쪽·아래쪽은 의자 크기를 뺀다 (chairX는 왼쪽 위 꼭짓점이라, 빼지 않으면 반쯤 박힌다)
+  // 위쪽 벽은 강의실 건물 아래 끝이다 (건물 안으로는 못 들어간다)
+  if (chairX < 0) chairX = 0;
+  if (chairX > canvas.width - CHAIR_SIZE) chairX = canvas.width - CHAIR_SIZE;
+  if (chairY < BUILDING_HEIGHT) chairY = BUILDING_HEIGHT;
+  if (chairY > canvas.height - CHAIR_SIZE) chairY = canvas.height - CHAIR_SIZE;
 
   // 자동차를 속도만큼 아래로 옮긴다
   carY = carY + carSpeedY;
@@ -326,7 +389,7 @@ function gameLoop() {
   }
 
   // ----- 10. 플레이어 의자 -----
-  ctx.drawImage(chairImage, CHAIR_X, CHAIR_Y, CHAIR_SIZE, CHAIR_SIZE);
+  ctx.drawImage(chairImage, chairX, chairY, CHAIR_SIZE, CHAIR_SIZE);
 
   // ----- 구름 그림자 (땅 위 모든 것 위에, 글자·게이지 아래에) -----
   // 타원 3개를 겹쳐서 뭉게구름 모양을 만든다
