@@ -74,6 +74,23 @@ let chairVX = 0;              // 의자의 지금 가로 속도 (양수 = 오른
 let chairVY = 0;              // 의자의 지금 세로 속도 (양수 = 아래)
 let chairAngle = 0;           // 의자가 바라보는 방향 (0 = 위쪽, 단위는 라디안)
 
+// ===== 드리프트 연출 =====
+const DRIFT_OVERSTEER = 0.6;  // 드리프트 중 몸통이 꺾는 방향보다 더 돌아가는 각도 (0.6 ≈ 35도). 클수록 꽁무니가 많이 빠진다
+const DRIFT_TURN_SPEED = 0.3; // 드리프트 중 몸을 돌리는 빠르기 (평소보다 빨리 휙 돈다)
+const DRIFT_MIN_SPEED = 1.5;  // 이 속도보다 느리면 드리프트 연출(자국, 연기)을 하지 않는다
+let isDrifting = false;       // 지금 드리프트로 미끄러지는 중인가 (연출을 켜고 끄는 데 쓴다)
+
+// 스키드 마크: 뒷바퀴가 지나간 자리에 남는 타이어 자국 (짧은 선분들의 목록)
+// 선분마다 { x1, y1, x2, y2, life }. life가 줄어들수록 흐려지고 0이 되면 지운다
+let skidMarks = [];
+const SKID_LIFE = 240;        // 자국이 사라지기까지 걸리는 프레임 수 (240 ≈ 4초)
+const SKID_WIDTH = 4;         // 자국 굵기
+let lastWheels = null;        // 직전 프레임의 뒷바퀴 위치 (자국 선을 이어 그리는 데 쓴다)
+
+// 바퀴 연기: 드리프트 중 뒷바퀴에서 피어오르는 회색 연기 ({ x, y, size, life })
+let smokes = [];
+const SMOKE_LIFE = 40;        // 연기가 사라지기까지 걸리는 프레임 수
+
 // 조작 방식 비교 실험용 스위치 (워크북 5장 Step 2 · Step 3)
 // "A" = keydown 안에서 직접 움직이는 방식 (꾹 누르면 끊기고, 대각선이 안 된다)
 // "B" = keys에 눌린 상태를 기록하고, 게임 루프에서 움직이는 방식 (매끄럽다)
@@ -234,14 +251,60 @@ function gameLoop() {
     chairX = chairX + chairVX;
     chairY = chairY + chairVY;
 
-    // 5) 의자가 방향키 쪽을 바라보게 조금씩 돌린다
-    //    드리프트 중에는 몸은 먼저 돌아가고 몸통은 옆으로 미끄러져서 드리프트처럼 보인다
+    // 5) 지금 드리프트 중인가: Shift를 누르고 있고, 어느 정도 빠르게 움직이는 중
+    const speed = Math.hypot(chairVX, chairVY);               // 지금 속력 (가로·세로 속도로 만든 빗변 길이)
+    isDrifting = keys["Shift"] && speed > DRIFT_MIN_SPEED;
+
+    // 6) 의자가 방향키 쪽을 바라보게 조금씩 돌린다
+    //    드리프트 중에는 꺾는 쪽으로 DRIFT_OVERSTEER만큼 더 돌아가서 꽁무니가 바깥으로 빠진다 (오버스티어)
     if (moveX !== 0 || moveY !== 0) {
-      const targetAngle = Math.atan2(moveX, -moveY);           // 방향키 쪽 각도 (위 = 0)
-      let diff = targetAngle - chairAngle;
-      diff = Math.atan2(Math.sin(diff), Math.cos(diff));       // 더 가까운 쪽으로 돌게 -180~180도로 맞춘다
-      chairAngle = chairAngle + diff * TURN_SPEED;
+      let targetAngle = Math.atan2(moveX, -moveY);             // 방향키 쪽 각도 (위 = 0)
+      let turnSpeed = TURN_SPEED;
+
+      if (isDrifting) {
+        // 실제로 미끄러져 가는 방향과 방향키 방향의 차이로 "어느 쪽으로 꺾는 중인지" 알아낸다
+        const moveAngle = Math.atan2(chairVX, -chairVY);
+        const turn = angleDiff(targetAngle, moveAngle);
+        if (Math.abs(turn) > 0.1) {
+          targetAngle = targetAngle + Math.sign(turn) * DRIFT_OVERSTEER;   // 꺾는 쪽으로 더 돌린다
+        }
+        turnSpeed = DRIFT_TURN_SPEED;
+      }
+
+      chairAngle = chairAngle + angleDiff(targetAngle, chairAngle) * turnSpeed;
     }
+  }
+
+  // 드리프트 연출: 뒷바퀴 자리에 스키드 마크와 연기를 남긴다
+  if (isDrifting) {
+    const wheels = getRearWheels();
+    if (lastWheels !== null) {
+      // 직전 바퀴 위치 → 지금 바퀴 위치를 잇는 짧은 선을 바퀴마다 하나씩 남긴다
+      for (let i = 0; i < 2; i++) {
+        skidMarks.push({ x1: lastWheels[i].x, y1: lastWheels[i].y, x2: wheels[i].x, y2: wheels[i].y, life: SKID_LIFE });
+      }
+    }
+    lastWheels = wheels;
+
+    // 두 프레임에 한 번꼴로 바퀴 한쪽에서 연기를 피운다
+    if (Math.random() < 0.5) {
+      const wheel = wheels[Math.floor(Math.random() * 2)];
+      smokes.push({ x: wheel.x, y: wheel.y, size: 6, life: SMOKE_LIFE });
+    }
+  } else {
+    lastWheels = null;   // 드리프트가 끊기면 다음 자국은 새로 시작한다 (멀리 떨어진 곳끼리 잇지 않게)
+  }
+
+  // 자국과 연기의 수명을 줄이고, 다 된 것은 지운다
+  // 지우면 뒤 칸이 앞으로 당겨지므로, 뒤에서부터 앞으로 거꾸로 돌아야 하나도 건너뛰지 않는다
+  for (let i = skidMarks.length - 1; i >= 0; i--) {
+    skidMarks[i].life = skidMarks[i].life - 1;
+    if (skidMarks[i].life <= 0) skidMarks.splice(i, 1);
+  }
+  for (let i = smokes.length - 1; i >= 0; i--) {
+    smokes[i].life = smokes[i].life - 1;
+    smokes[i].size = smokes[i].size + 0.5;   // 연기는 퍼지면서 커진다
+    if (smokes[i].life <= 0) smokes.splice(i, 1);
   }
 
   // 의자가 화면 밖으로 나가지 않게 네 벽에서 막는다 (벽에 닿으면 그 방향 속도는 0)
@@ -385,6 +448,19 @@ function gameLoop() {
     ctx.fillRect(x, CROSSWALK_Y, 20, CROSSWALK_HEIGHT);
   }
 
+  // ----- 스키드 마크: 땅바닥에 붙은 자국이라 땅 그림 바로 위, 나머지 모든 것 아래에 -----
+  // 남은 수명(life)이 적을수록 투명하게 그려서 서서히 사라지게 한다
+  ctx.lineWidth = SKID_WIDTH;
+  ctx.lineCap = "round";
+  for (const mark of skidMarks) {
+    ctx.strokeStyle = "rgba(20, 20, 20, " + (0.45 * mark.life / SKID_LIFE) + ")";
+    ctx.beginPath();
+    ctx.moveTo(mark.x1, mark.y1);
+    ctx.lineTo(mark.x2, mark.y2);
+    ctx.stroke();
+  }
+  ctx.lineCap = "butt";   // 다른 선 그리기에 영향이 없게 원래대로
+
   // ----- 5. 나무 (잔디 위): 풀과 같은 흔들림 시계로 살짝 기울었다 돌아온다 -----
   // 풀처럼 화면 한 장 분량의 배치를 맵 전체에 반복한다
   for (let screenTop = 0; screenTop < WORLD_HEIGHT; screenTop += SCREEN_HEIGHT) {
@@ -470,12 +546,33 @@ function gameLoop() {
     ctx.restore();
   }
 
+  // ----- 9. 바퀴 연기: 의자 아래에 깔리게 의자보다 먼저 그린다 -----
+  // 남은 수명이 적을수록 투명해지고, 계산 부분에서 size를 키워서 퍼지며 사라진다
+  for (const smoke of smokes) {
+    ctx.fillStyle = "rgba(220, 220, 220, " + (0.5 * smoke.life / SMOKE_LIFE) + ")";
+    ctx.beginPath();
+    ctx.arc(smoke.x, smoke.y, smoke.size, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
   // ----- 10. 플레이어 의자: 바라보는 방향(chairAngle)으로 돌려서 그린다 -----
   ctx.save();
   ctx.translate(chairX + CHAIR_SIZE / 2, chairY + CHAIR_SIZE / 2);   // 의자 중심으로 붓을 옮긴다
   ctx.rotate(chairAngle);
   ctx.drawImage(chairImage, -CHAIR_SIZE / 2, -CHAIR_SIZE / 2, CHAIR_SIZE, CHAIR_SIZE);
   ctx.restore();
+
+  // 드리프트 중이면 의자 위에 "DRIFT!" 글자를 띄운다
+  if (isDrifting) {
+    ctx.fillStyle = "#ffd84d";
+    ctx.strokeStyle = "#000000";
+    ctx.lineWidth = 3;
+    ctx.font = "bold italic 16px sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.strokeText("DRIFT!", chairX + CHAIR_SIZE / 2, chairY - 12);   // 검은 테두리를 먼저 그려서
+    ctx.fillText("DRIFT!", chairX + CHAIR_SIZE / 2, chairY - 12);     // 어느 배경에서도 잘 보이게
+  }
 
   // ----- 구름 그림자 (땅 위 모든 것 위에, 글자·게이지 아래에) -----
   // 타원 3개를 겹쳐서 뭉게구름 모양을 만든다
@@ -544,6 +641,33 @@ function gameLoop() {
 
   // ===== ④ 다음 프레임 예약: 다음 그림 때 gameLoop를 또 불러 달라고 부탁한다 =====
   requestAnimationFrame(gameLoop);
+}
+
+// ===== 각도 차이 계산 =====
+// 각도 a에서 b를 뺀 차이를 -180~180도(-π~π) 사이로 맞춰 준다
+// 예: 350도와 10도의 차이를 340도가 아니라 -20도로 계산해서, 더 가까운 쪽으로 돌게 한다
+function angleDiff(a, b) {
+  const diff = a - b;
+  return Math.atan2(Math.sin(diff), Math.cos(diff));
+}
+
+// ===== 의자 뒷바퀴 위치 =====
+// 의자 그림의 뒷바퀴 두 개는 의자 중심에서 좌우로 14, 뒤로 22 떨어져 있다
+// 의자가 chairAngle만큼 돌아가 있으니, 그 위치도 같이 돌려서 맵 좌표로 바꾼다
+function getRearWheels() {
+  const centerX = chairX + CHAIR_SIZE / 2;
+  const centerY = chairY + CHAIR_SIZE / 2;
+  const cos = Math.cos(chairAngle);
+  const sin = Math.sin(chairAngle);
+  const wheels = [];
+  for (const side of [-14, 14]) {          // 왼쪽 바퀴(-14), 오른쪽 바퀴(14)
+    const back = 22;                       // 뒤쪽(그림의 아래쪽)으로 22
+    wheels.push({
+      x: centerX + side * cos - back * sin,
+      y: centerY + side * sin + back * cos,
+    });
+  }
+  return wheels;
 }
 
 // ===== 전조등 그리기 =====
