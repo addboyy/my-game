@@ -142,6 +142,7 @@ let car2S = 3500;
 let car2Speed = -6;       // 한 프레임에 트랙을 거슬러 6씩 (음수 = 결승 → 출발 방향)
 const CAR_RESPAWN_AHEAD = 2500;   // 자동차가 멀어지면 의자보다 이만큼 앞에 다시 나타난다
 const CAR_RESPAWN_BEHIND = 1500;  // 의자보다 이만큼 뒤로 처지면 다시 나타나게 한다
+const CAR_INSIDE_BUILDING = 150;  // 결승을 지나 이만큼 더 가면 강의실 건물 안에 완전히 가려진다
 
 // 자동차 전조등: 자동차 앞쪽으로 뻗는 노란 반투명 빛
 const HEADLIGHT_LENGTH = 45;  // 빛이 뻗는 길이
@@ -353,11 +354,16 @@ function gameLoop() {
   const chairCenterX = chairX + CHAIR_SIZE / 2;
   const chairCenterY = chairY + CHAIR_SIZE / 2;
 
-  // 자동차 1을 트랙을 따라 앞으로 옮긴다
-  // 의자보다 한참 뒤로 처지거나 결승에 닿으면, 의자보다 앞쪽에 다시 나타난다
+  // 자동차 1을 트랙을 따라 앞으로 옮긴다. 결승을 지나면 강의실 건물 안으로 들어가 가려진다
+  // 의자보다 한참 뒤로 처지거나 건물 안으로 다 들어가면, 의자보다 앞쪽에 다시 나타난다
+  // 단, 의자가 결승 근처라 앞쪽 자리가 트랙 밖이면, 의자 뒤쪽(화면 밖)에 다시 놓는다
   carS = carS + carSpeed;
-  if (carS < chairS - CAR_RESPAWN_BEHIND || carS > TRACK_LENGTH) {
-    carS = Math.min(chairS + CAR_RESPAWN_AHEAD, TRACK_LENGTH - 100);
+  if (carS < chairS - CAR_RESPAWN_BEHIND || carS > TRACK_LENGTH + CAR_INSIDE_BUILDING) {
+    if (chairS + CAR_RESPAWN_AHEAD < TRACK_LENGTH) {
+      carS = chairS + CAR_RESPAWN_AHEAD;
+    } else {
+      carS = chairS - CAR_RESPAWN_BEHIND + 200;
+    }
   }
 
   // 흔들림 시계를 조금 앞으로 돌린다 (풀잎 흔들림에 쓴다)
@@ -365,9 +371,10 @@ function gameLoop() {
 
   // 자동차 2를 트랙을 거슬러 옮긴다 (속도가 음수라 s가 줄어든다)
   // 의자 뒤로 지나가 버리면, 다시 의자 앞쪽에서 마주 오게 한다
+  // 앞쪽 자리가 트랙 끝을 넘으면 강의실 건물 안에서 출발해서, 건물에서 나오는 것처럼 보이게 한다
   car2S = car2S + car2Speed;
   if (car2S < chairS - CAR_RESPAWN_BEHIND || car2S < 0) {
-    car2S = Math.min(chairS + CAR_RESPAWN_AHEAD, TRACK_LENGTH - 100);
+    car2S = Math.min(chairS + CAR_RESPAWN_AHEAD, TRACK_LENGTH + CAR_INSIDE_BUILDING);
   }
 
   // 학생들을 인도 위에서 걷는 속도만큼 옮기고, 자기 구간 끝에 닿으면 방향을 뒤집는다
@@ -906,7 +913,11 @@ function drawChair() {
 // s: 트랙 거리 / lane: 1 = 진행 방향 오른쪽 차선, -1 = 왼쪽 차선 / forward: 트랙 방향으로 가는 차인가
 // bridgeLevel: 지금 그리는 층 (그 층에 있는 차만 그린다)
 function drawCar(s, lane, forward, bridgeLevel) {
-  const p = pointAt(s);
+  let p = pointAt(s);
+  if (s > TRACK_LENGTH) {
+    // 결승을 지난 차: 트랙 끝 방향으로 그대로 더 나아간 자리 (강의실 건물 안으로 들어간다)
+    p = { x: p.x + p.tx * (s - TRACK_LENGTH), y: p.y + p.ty * (s - TRACK_LENGTH), tx: p.tx, ty: p.ty, bridge: p.bridge };
+  }
   if (p.bridge !== bridgeLevel) return;
   // 차선 위치: 길 가운데에서 진행 방향의 옆으로 LANE_OFFSET만큼
   const centerX = p.x - p.ty * lane * LANE_OFFSET;
