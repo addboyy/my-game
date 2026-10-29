@@ -65,7 +65,7 @@ let chairX = 375;
 let chairY = WORLD_HEIGHT - 110;
 
 // ===== 조작 설정 (여기 숫자를 바꿔 가며 조작 느낌을 튜닝한다) =====
-const CHAIR_SPEED = 5;        // 이동 속도: 한 프레임에 움직이는 픽셀 수 (최고 속도)
+const CHAIR_SPEED = 4;        // 이동 속도: 한 프레임에 움직이는 픽셀 수 (최고 속도)
 const GRIP = 0.25;            // 평소 접지력 (0~1): 클수록 키를 누른 방향으로 바로 꺾이고 바로 선다
 const DRIFT_GRIP = 0.03;      // Shift 드리프트 중 접지력: 작을수록 관성이 커서 옆으로 오래 미끄러진다
 const TURN_SPEED = 0.2;       // 의자가 가는 방향으로 몸을 돌리는 빠르기 (0~1)
