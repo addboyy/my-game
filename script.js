@@ -13,8 +13,9 @@ const WORLD_LEFT = -400;                    // 맵 왼쪽 끝 x (화면 폭 바�
 const WORLD_RIGHT = 1200;                   // 맵 오른쪽 끝 x
 const WORLD_HEIGHT = SCREEN_HEIGHT * 12;    // 맵 전체 세로 길이 (화면 12장 = 7200)
 const CAMERA_ANCHOR_Y = 430;                // 의자가 화면에서 머무르는 높이 (가로는 한가운데). 아래쪽이라 앞이 넓게 보인다
-const CAMERA_TURN_FOLLOW = 0.08;            // 카메라가 의자 방향을 따라 도는 빠르기 (0~1). 작을수록 늦게, 부드럽게 따라 돈다
-const VIEW_RADIUS = 650;                    // 화면이 돌아가도 보일 수 있는 의자 주변 범위 (이 밖은 그리지 않는다)
+const CAMERA_TURN_FOLLOW = 0.04;            // 카메라가 의자 방향을 따라 도는 빠르기 (0~1). 작을수록 늦게, 부드럽게 따라 돈다
+const CAMERA_ZOOM = 0.7;                    // 화면 확대 배율 (1 = 원래 크기). 작을수록 카메라가 멀어져서 넓게 보인다
+const VIEW_RADIUS = 650 / CAMERA_ZOOM;      // 화면이 돌아가도 보일 수 있는 의자 주변 범위 (이 밖은 그리지 않는다)
 let cameraAngle = 0;                        // 카메라가 바라보는 방향 (0 = 맵 위쪽)
 
 // ===== 트랙 (구불구불한 캠퍼스 도로) =====
@@ -380,15 +381,17 @@ function gameLoop() {
 
   // ===== ③ 그리기: 바뀐 숫자대로 화면을 그린다 =====
 
-  // 카메라 (추격 시점): 세 단계로 붓을 옮긴다. 아래에서부터 거꾸로 읽으면 이해하기 쉽다
-  //   ③ 의자 중심이 (0, 0)에 오게 맵을 민다
+  // 카메라 (추격 시점): 네 단계로 붓을 옮긴다. 아래에서부터 거꾸로 읽으면 이해하기 쉽다
+  //   ④ 의자 중심이 (0, 0)에 오게 맵을 민다
+  //   ③ CAMERA_ZOOM만큼 맵을 작게 줄인다 → 카메라가 멀리서 보는 것처럼 넓게 보인다
   //   ② 카메라 각도만큼 맵을 반대로 돌린다 → 의자가 바라보는 쪽이 화면 위쪽이 된다
   //   ① (0, 0)을 화면 가운데 아래(의자 자리)로 옮긴다
   // 여기부터 restore 전까지는 전부 "맵 위의 좌표"로 그린다
   ctx.save();
   ctx.translate(SCREEN_WIDTH / 2, CAMERA_ANCHOR_Y);   // ①
   ctx.rotate(-cameraAngle);                           // ②
-  ctx.translate(-chairCenterX, -chairCenterY);        // ③
+  ctx.scale(CAMERA_ZOOM, CAMERA_ZOOM);                // ③
+  ctx.translate(-chairCenterX, -chairCenterY);        // ④
 
   // 지금 화면에 보이는 맵 범위 (보이지 않는 곳은 그리지 않아서 빠르게)
   // 화면이 돌아가 있어서, 의자 주변 VIEW_RADIUS 안은 어느 방향이든 보일 수 있다
@@ -595,8 +598,8 @@ function gameLoop() {
     ctx.font = "bold italic 16px sans-serif";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.strokeText("DRIFT!", SCREEN_WIDTH / 2, CAMERA_ANCHOR_Y - 45);   // 검은 테두리를 먼저 그려서
-    ctx.fillText("DRIFT!", SCREEN_WIDTH / 2, CAMERA_ANCHOR_Y - 45);     // 어느 배경에서도 잘 보이게
+    ctx.strokeText("DRIFT!", SCREEN_WIDTH / 2, CAMERA_ANCHOR_Y - 35);   // 검은 테두리를 먼저 그려서
+    ctx.fillText("DRIFT!", SCREEN_WIDTH / 2, CAMERA_ANCHOR_Y - 35);     // 어느 배경에서도 잘 보이게
   }
 
   // ----- 11. 글자: 남은 시간 (화면 위 가운데) -----
