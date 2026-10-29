@@ -6,10 +6,14 @@ const ctx = canvas.getContext("2d");             // 그 도화지에 그릴 "붓
 
 // ===== 맵과 카메라 (스크롤) =====
 // 맵은 화면보다 세로로 길다. 아래 좌표들은 전부 "맵 위의 좌표"다 (맵 맨 위 = 0, 강의실이 있는 곳).
-// 화면은 맵의 일부만 비추는 카메라이고, 의자가 위로 가면 카메라도 따라 올라간다.
+// 화면은 맵의 일부만 비추는 카메라이고, 의자를 상하좌우로 따라다닌다.
+const SCREEN_WIDTH = 800;
 const SCREEN_HEIGHT = 600;
+const WORLD_LEFT = -400;                    // 맵 왼쪽 끝 x (화면 폭 바깥으로 400 더 넓다)
+const WORLD_RIGHT = 1200;                   // 맵 오른쪽 끝 x
 const WORLD_HEIGHT = SCREEN_HEIGHT * 12;    // 맵 전체 세로 길이 (화면 12장 = 7200)
 const CAMERA_FOLLOW_Y = 380;                // 스크롤 중에 의자가 머무르는 화면 속 높이
+let cameraX = 0;                            // 카메라가 비추는 맨 왼쪽의 맵 x
 let cameraY = WORLD_HEIGHT - SCREEN_HEIGHT; // 카메라가 비추는 맨 위의 맵 y (처음엔 맵 맨 아래 화면)
 
 // ===== 트랙 (구불구불한 캠퍼스 도로) =====
@@ -72,7 +76,7 @@ let chairX = 375;
 let chairY = WORLD_HEIGHT - 110;
 
 // ===== 조작 설정 (여기 숫자를 바꿔 가며 조작 느낌을 튜닝한다) =====
-const CHAIR_SPEED = 4;        // 이동 속도: 한 프레임에 움직이는 픽셀 수 (최고 속도)
+const CHAIR_SPEED = 6;        // 이동 속도: 한 프레임에 움직이는 픽셀 수 (최고 속도)
 const GRIP = 0.25;            // 평소 접지력 (0~1): 클수록 키를 누른 방향으로 바로 꺾이고 바로 선다
 const DRIFT_GRIP = 0.03;      // Shift 드리프트 중 접지력: 작을수록 관성이 커서 옆으로 오래 미끄러진다
 const TURN_SPEED = 0.2;       // 의자가 가는 방향으로 몸을 돌리는 빠르기 (0~1)
@@ -311,15 +315,15 @@ function gameLoop() {
     if (smokes[i].life <= 0) smokes.splice(i, 1);
   }
 
-  // 의자가 화면 밖으로 나가지 않게 네 벽에서 막는다 (벽에 닿으면 그 방향 속도는 0)
+  // 의자가 맵 밖으로 나가지 않게 네 벽에서 막는다 (벽에 닿으면 그 방향 속도는 0)
   // 오른쪽·아래쪽은 의자 크기를 뺀다 (chairX는 왼쪽 위 꼭짓점이라, 빼지 않으면 반쯤 박힌다)
   // 위쪽 벽은 강의실 건물 아래 끝이다 (건물 안으로는 못 들어간다)
-  if (chairX < 0) {
-    chairX = 0;
+  if (chairX < WORLD_LEFT) {
+    chairX = WORLD_LEFT;
     chairVX = 0;
   }
-  if (chairX > canvas.width - CHAIR_SIZE) {
-    chairX = canvas.width - CHAIR_SIZE;
+  if (chairX > WORLD_RIGHT - CHAIR_SIZE) {
+    chairX = WORLD_RIGHT - CHAIR_SIZE;
     chairVX = 0;
   }
   if (chairY < BUILDING_HEIGHT) {
@@ -331,8 +335,11 @@ function gameLoop() {
     chairVY = 0;
   }
 
-  // 카메라가 의자를 따라간다: 의자가 화면 속 CAMERA_FOLLOW_Y 높이에 오게 맞춘다
-  // 단, 맵 맨 위보다 위나 맵 맨 아래보다 아래는 비추지 않는다
+  // 카메라가 의자를 따라간다: 가로는 의자가 화면 한가운데, 세로는 화면 속 CAMERA_FOLLOW_Y 높이에 오게 맞춘다
+  // 단, 맵 끝 바깥은 비추지 않는다
+  cameraX = chairX + CHAIR_SIZE / 2 - SCREEN_WIDTH / 2;
+  if (cameraX < WORLD_LEFT) cameraX = WORLD_LEFT;
+  if (cameraX > WORLD_RIGHT - SCREEN_WIDTH) cameraX = WORLD_RIGHT - SCREEN_WIDTH;
   cameraY = chairY - CAMERA_FOLLOW_Y;
   if (cameraY < 0) cameraY = 0;
   if (cameraY > WORLD_HEIGHT - SCREEN_HEIGHT) cameraY = WORLD_HEIGHT - SCREEN_HEIGHT;
@@ -367,11 +374,11 @@ function gameLoop() {
     student.x = roadCenterX(student.y) + student.side * (ROAD_HALF + SIDEWALK_WIDTH / 2);
   }
 
-  // 구름 그림자를 오른쪽으로 천천히 옮기고, 화면 오른쪽 밖으로 나가면 왼쪽 밖에서 다시 들어온다
+  // 구름 그림자를 오른쪽으로 천천히 옮기고, 맵 오른쪽 끝 밖으로 나가면 왼쪽 끝 밖에서 다시 들어온다
   for (const cloud of clouds) {
     cloud.x = cloud.x + cloud.speedX;
-    if (cloud.x - CLOUD_RADIUS * cloud.size > canvas.width) {
-      cloud.x = -CLOUD_RADIUS * cloud.size;
+    if (cloud.x - CLOUD_RADIUS * cloud.size > WORLD_RIGHT) {
+      cloud.x = WORLD_LEFT - CLOUD_RADIUS * cloud.size;
     }
   }
 
@@ -384,20 +391,22 @@ function gameLoop() {
 
   // ===== ③ 그리기: 바뀐 숫자대로 화면을 그린다 =====
 
-  // 카메라: 맵 전체를 cameraY만큼 위로 밀어 올려서 그린다
-  // 그러면 맵 위의 y = cameraY인 곳이 화면 맨 위(0)에 온다.
+  // 카메라: 맵 전체를 cameraX만큼 왼쪽으로, cameraY만큼 위로 밀어서 그린다
+  // 그러면 맵 위의 (cameraX, cameraY)인 곳이 화면 왼쪽 위(0, 0)에 온다.
   // 여기부터 restore 전까지는 전부 "맵 위의 좌표"로 그린다
   ctx.save();
-  ctx.translate(0, -cameraY);
+  ctx.translate(-cameraX, -cameraY);
 
   // 지금 화면에 보이는 맵 범위 (보이지 않는 곳은 그리지 않아서 빠르게)
   const viewTop = cameraY - TRACK_STEP;
   const viewBottom = cameraY + SCREEN_HEIGHT + TRACK_STEP;
+  const viewLeft = cameraX - TREE_SIZE;
+  const viewRight = cameraX + SCREEN_WIDTH + TREE_SIZE;
 
   // ----- 1. 잔디 (화면 전체 바닥) -----
   // [새로 시도] 패턴: 작은 잔디 그림을 타일처럼 반복해서 칠한다. 길은 이 위에 덮어 그린다
   ctx.fillStyle = ctx.createPattern(grassImage, "repeat");
-  ctx.fillRect(0, cameraY, 800, SCREEN_HEIGHT);
+  ctx.fillRect(cameraX, cameraY, SCREEN_WIDTH, SCREEN_HEIGHT);
 
   // 풀 포기: 포기마다 풀잎 3개. 끝부분이 sin(사인) 물결처럼 좌우로 흔들린다
   // 포기마다 위치를 더해서 흔들리는 타이밍을 다르게 → 바람이 지나가는 것처럼 보인다
@@ -405,6 +414,7 @@ function gameLoop() {
   ctx.lineWidth = 2;
   for (const tuft of grassTufts) {
     if (tuft.y < viewTop || tuft.y > viewBottom + GRASS_BLADE_HEIGHT) continue;   // 화면 밖이면 건너뛴다
+    if (tuft.x < viewLeft || tuft.x > viewRight) continue;
     const sway = Math.sin(swayTime + tuft.x * 0.05 + tuft.y * 0.03) * GRASS_SWAY;
     for (let i = -1; i <= 1; i++) {
       const rootX = tuft.x + i * 4;                        // 풀잎 뿌리 (4픽셀 간격)
@@ -477,6 +487,7 @@ function gameLoop() {
   // ----- 5. 나무 (잔디 위): 풀과 같은 흔들림 시계로 살짝 기울었다 돌아온다 -----
   for (const tree of trees) {
     if (tree.y + TREE_SIZE < viewTop || tree.y > viewBottom) continue;   // 화면 밖이면 건너뛴다
+    if (tree.x < viewLeft || tree.x > viewRight) continue;
     const angle = Math.sin(swayTime * 0.8 + tree.y * 0.02) * TREE_SWAY_ANGLE;
     ctx.save();
     ctx.translate(tree.x + TREE_SIZE / 2, tree.y + TREE_SIZE / 2);   // 나무 중심으로 붓을 옮긴다
@@ -493,15 +504,15 @@ function gameLoop() {
   // ----- 6. 강의실 건물 (맨 위) -----
   // 벽돌색 건물 벽
   ctx.fillStyle = "#9c4a3a";
-  ctx.fillRect(0, 0, 800, BUILDING_HEIGHT);
+  ctx.fillRect(WORLD_LEFT, 0, WORLD_RIGHT - WORLD_LEFT, BUILDING_HEIGHT);
 
   // 건물 지붕 끝선: 아래쪽에 진한 띠
   ctx.fillStyle = "#6e2f24";
-  ctx.fillRect(0, BUILDING_HEIGHT - 8, 800, 8);
+  ctx.fillRect(WORLD_LEFT, BUILDING_HEIGHT - 8, WORLD_RIGHT - WORLD_LEFT, 8);
 
   // 창문: 하늘색 사각형을 일정한 간격으로 (문 자리는 비운다)
   ctx.fillStyle = "#a8dadc";
-  for (let x = 30; x < 800; x += 90) {
+  for (let x = WORLD_LEFT + 30; x < WORLD_RIGHT; x += 90) {
     if (x > DOOR_X - 60 && x < DOOR_X + DOOR_WIDTH) {
       continue;   // 문이 있는 자리에는 창문을 그리지 않는다
     }
@@ -709,38 +720,44 @@ function drawCar(side, topY, goingDown) {
 // ===== 맵 꾸미기: 나무·풀·학생·구름 배치 (시작할 때 한 번) =====
 // 길은 휘어 있으니 자리를 손으로 정하지 않고, 높이마다 길 바깥 잔디가 얼마나 남는지 재서 놓는다
 function placeScenery() {
-  // 나무: TREE_GAP마다 양쪽 잔디에 하나씩. 나무 높이 전체에서 길과 안 겹치는 자리에만 놓는다
+  // 나무: TREE_GAP마다 양쪽 잔디에 두 그루씩. 나무 높이 전체에서 길과 안 겹치는 자리에만 놓는다
   for (let y = BUILDING_HEIGHT + 30; y < WORLD_HEIGHT - TREE_SIZE; y += TREE_GAP) {
-    // 나무가 차지하는 높이(위·가운데·아래)에서 길 바깥 끝을 재서, 가장 좁은 곳 기준으로 놓는다
-    let leftSpace = 800;    // 왼쪽 잔디의 오른쪽 끝 x (작을수록 왼쪽 잔디가 좁다)
-    let rightStart = 0;     // 오른쪽 잔디의 왼쪽 끝 x
+    // 나무가 차지하는 높이(위·가운데·아래)에서 길 바깥 끝을 재서, 가장 길에 가까운 곳 기준으로 놓는다
+    let leftEdge = WORLD_RIGHT;   // 왼쪽 잔디가 끝나는 x (여기부터 오른쪽은 인도)
+    let rightEdge = WORLD_LEFT;   // 오른쪽 잔디가 시작하는 x
     for (const dy of [0, TREE_SIZE / 2, TREE_SIZE]) {
       const center = roadCenterX(y + dy);
-      leftSpace = Math.min(leftSpace, center - ROAD_HALF - SIDEWALK_WIDTH);
-      rightStart = Math.max(rightStart, center + ROAD_HALF + SIDEWALK_WIDTH);
+      leftEdge = Math.min(leftEdge, center - ROAD_HALF - SIDEWALK_WIDTH);
+      rightEdge = Math.max(rightEdge, center + ROAD_HALF + SIDEWALK_WIDTH);
     }
-    // 나무는 화면 밖으로 20픽셀까지 걸쳐도 된다. 길과는 8픽셀 띄운다
-    const leftMaxX = leftSpace - 8 - TREE_SIZE;
-    if (leftMaxX >= -20) {
-      trees.push({ x: -20 + Math.random() * (leftMaxX + 20), y: y + Math.random() * 40 });
-    }
-    const rightMinX = rightStart + 8;
-    if (rightMinX <= 820 - TREE_SIZE) {
-      trees.push({ x: rightMinX + Math.random() * (820 - TREE_SIZE - rightMinX), y: y + Math.random() * 40 });
+    for (let i = 0; i < 2; i++) {
+      // 길에서 8 ~ 360픽셀 떨어진 곳에 놓는다. 맵 끝 바깥으로 나가면 건너뛴다
+      const leftX = leftEdge - 8 - TREE_SIZE - Math.random() * 352;
+      if (leftX >= WORLD_LEFT) {
+        trees.push({ x: leftX, y: y + Math.random() * 40 });
+      }
+      const rightX = rightEdge + 8 + Math.random() * 352;
+      if (rightX + TREE_SIZE <= WORLD_RIGHT) {
+        trees.push({ x: rightX, y: y + Math.random() * 40 });
+      }
     }
   }
 
-  // 풀 포기: TUFT_GAP마다 양쪽 잔디에 하나씩 (잔디가 20픽셀보다 좁으면 건너뛴다)
+  // 풀 포기: TUFT_GAP마다 양쪽 잔디에 세 개씩, 길에서 16 ~ 380픽셀 떨어진 곳에
   for (let y = BUILDING_HEIGHT + 30; y < WORLD_HEIGHT; y += TUFT_GAP) {
     const tuftY = y + Math.random() * TUFT_GAP;
-    // 풀잎 뿌리(tuftY)와 끝(tuftY - 풀잎 길이) 두 높이에서 길 바깥 끝을 재서 더 좁은 쪽 기준으로 놓는다
+    // 풀잎 뿌리(tuftY)와 끝(tuftY - 풀잎 길이) 두 높이에서 길 바깥 끝을 재서 길에 더 가까운 쪽 기준으로 놓는다
     const leftEdge = Math.min(roadCenterX(tuftY), roadCenterX(tuftY - GRASS_BLADE_HEIGHT)) - ROAD_HALF - SIDEWALK_WIDTH;
     const rightEdge = Math.max(roadCenterX(tuftY), roadCenterX(tuftY - GRASS_BLADE_HEIGHT)) + ROAD_HALF + SIDEWALK_WIDTH;
-    if (leftEdge > 30) {
-      grassTufts.push({ x: 8 + Math.random() * (leftEdge - 24), y: tuftY });
-    }
-    if (800 - rightEdge > 30) {
-      grassTufts.push({ x: rightEdge + 16 + Math.random() * (800 - rightEdge - 24), y: tuftY });
+    for (let i = 0; i < 3; i++) {
+      const leftX = leftEdge - 16 - Math.random() * 364;
+      if (leftX >= WORLD_LEFT + 8) {
+        grassTufts.push({ x: leftX, y: tuftY });
+      }
+      const rightX = rightEdge + 16 + Math.random() * 364;
+      if (rightX <= WORLD_RIGHT - 8) {
+        grassTufts.push({ x: rightX, y: tuftY });
+      }
     }
   }
 
@@ -759,10 +776,10 @@ function placeScenery() {
     side = -side;   // 다음 학생은 반대쪽 인도
   }
 
-  // 구름: 화면 한 장마다 하나씩, 가로 위치·속도·크기는 제각각
-  for (let y = 260; y < WORLD_HEIGHT; y += SCREEN_HEIGHT) {
+  // 구름: 화면 반 장마다 하나씩 (맵이 넓어서), 가로 위치·속도·크기는 제각각
+  for (let y = 260; y < WORLD_HEIGHT; y += SCREEN_HEIGHT / 2) {
     clouds.push({
-      x: Math.random() * 800,
+      x: WORLD_LEFT + Math.random() * (WORLD_RIGHT - WORLD_LEFT),
       y: y + Math.random() * 200,
       speedX: 0.2 + Math.random() * 0.2,
       size: 0.7 + Math.random() * 0.3,
