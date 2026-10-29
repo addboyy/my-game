@@ -54,7 +54,14 @@ let chairX = 375;
 let chairY = 490;
 
 // ===== 조작 설정 (여기 숫자를 바꿔 가며 조작 느낌을 튜닝한다) =====
-const CHAIR_SPEED = 5;        // 이동 속도: 한 프레임에 움직이는 픽셀 수
+const CHAIR_SPEED = 5;        // 이동 속도: 한 프레임에 움직이는 픽셀 수 (최고 속도)
+const GRIP = 0.25;            // 평소 접지력 (0~1): 클수록 키를 누른 방향으로 바로 꺾이고 바로 선다
+const DRIFT_GRIP = 0.03;      // Shift 드리프트 중 접지력: 작을수록 관성이 커서 옆으로 오래 미끄러진다
+const TURN_SPEED = 0.2;       // 의자가 가는 방향으로 몸을 돌리는 빠르기 (0~1)
+
+let chairVX = 0;              // 의자의 지금 가로 속도 (양수 = 오른쪽)
+let chairVY = 0;              // 의자의 지금 세로 속도 (양수 = 아래)
+let chairAngle = 0;           // 의자가 바라보는 방향 (0 = 위쪽, 단위는 라디안)
 
 // 조작 방식 비교 실험용 스위치 (워크북 5장 Step 2 · Step 3)
 // "A" = keydown 안에서 직접 움직이는 방식 (꾹 누르면 끊기고, 대각선이 안 된다)
@@ -187,21 +194,60 @@ function gameLoop() {
   // ===== ② 계산: 상태(숫자)를 바꾼다 =====
 
   // 의자 조작 (방식 B): 지금 눌려 있는 키를 보고 움직인다
-  // 두 키를 같이 누르면 두 줄이 다 실행되므로 대각선으로 간다
   if (CONTROL_METHOD === "B") {
-    if (keys["ArrowLeft"]) chairX = chairX - CHAIR_SPEED;
-    if (keys["ArrowRight"]) chairX = chairX + CHAIR_SPEED;
-    if (keys["ArrowUp"]) chairY = chairY - CHAIR_SPEED;
-    if (keys["ArrowDown"]) chairY = chairY + CHAIR_SPEED;
+    // 1) 눌린 방향키로 "가고 싶은 방향"을 정한다 (-1, 0, 1)
+    //    두 키를 같이 누르면 두 줄이 다 실행되므로 대각선이 된다
+    let moveX = 0;
+    let moveY = 0;
+    if (keys["ArrowLeft"]) moveX = moveX - 1;
+    if (keys["ArrowRight"]) moveX = moveX + 1;
+    if (keys["ArrowUp"]) moveY = moveY - 1;
+    if (keys["ArrowDown"]) moveY = moveY + 1;
+
+    // 2) Shift를 누르고 있으면 드리프트: 접지력이 약해져서 미끄러진다
+    let grip = GRIP;
+    if (keys["Shift"]) {
+      grip = DRIFT_GRIP;
+    }
+
+    // 3) 지금 속도가 목표 속도(방향 × 최고 속도)를 grip 비율만큼만 따라간다
+    //    grip이 크면 금방 따라가서 바로 꺾이고, 작으면 원래 가던 쪽으로 계속 미끄러진다 (관성)
+    chairVX = chairVX + (moveX * CHAIR_SPEED - chairVX) * grip;
+    chairVY = chairVY + (moveY * CHAIR_SPEED - chairVY) * grip;
+
+    // 4) 속도만큼 위치를 옮긴다
+    chairX = chairX + chairVX;
+    chairY = chairY + chairVY;
+
+    // 5) 의자가 방향키 쪽을 바라보게 조금씩 돌린다
+    //    드리프트 중에는 몸은 먼저 돌아가고 몸통은 옆으로 미끄러져서 드리프트처럼 보인다
+    if (moveX !== 0 || moveY !== 0) {
+      const targetAngle = Math.atan2(moveX, -moveY);           // 방향키 쪽 각도 (위 = 0)
+      let diff = targetAngle - chairAngle;
+      diff = Math.atan2(Math.sin(diff), Math.cos(diff));       // 더 가까운 쪽으로 돌게 -180~180도로 맞춘다
+      chairAngle = chairAngle + diff * TURN_SPEED;
+    }
   }
 
-  // 의자가 화면 밖으로 나가지 않게 네 벽에서 막는다
+  // 의자가 화면 밖으로 나가지 않게 네 벽에서 막는다 (벽에 닿으면 그 방향 속도는 0)
   // 오른쪽·아래쪽은 의자 크기를 뺀다 (chairX는 왼쪽 위 꼭짓점이라, 빼지 않으면 반쯤 박힌다)
   // 위쪽 벽은 강의실 건물 아래 끝이다 (건물 안으로는 못 들어간다)
-  if (chairX < 0) chairX = 0;
-  if (chairX > canvas.width - CHAIR_SIZE) chairX = canvas.width - CHAIR_SIZE;
-  if (chairY < BUILDING_HEIGHT) chairY = BUILDING_HEIGHT;
-  if (chairY > canvas.height - CHAIR_SIZE) chairY = canvas.height - CHAIR_SIZE;
+  if (chairX < 0) {
+    chairX = 0;
+    chairVX = 0;
+  }
+  if (chairX > canvas.width - CHAIR_SIZE) {
+    chairX = canvas.width - CHAIR_SIZE;
+    chairVX = 0;
+  }
+  if (chairY < BUILDING_HEIGHT) {
+    chairY = BUILDING_HEIGHT;
+    chairVY = 0;
+  }
+  if (chairY > canvas.height - CHAIR_SIZE) {
+    chairY = canvas.height - CHAIR_SIZE;
+    chairVY = 0;
+  }
 
   // 자동차를 속도만큼 아래로 옮긴다
   carY = carY + carSpeedY;
@@ -388,8 +434,12 @@ function gameLoop() {
     ctx.restore();
   }
 
-  // ----- 10. 플레이어 의자 -----
-  ctx.drawImage(chairImage, chairX, chairY, CHAIR_SIZE, CHAIR_SIZE);
+  // ----- 10. 플레이어 의자: 바라보는 방향(chairAngle)으로 돌려서 그린다 -----
+  ctx.save();
+  ctx.translate(chairX + CHAIR_SIZE / 2, chairY + CHAIR_SIZE / 2);   // 의자 중심으로 붓을 옮긴다
+  ctx.rotate(chairAngle);
+  ctx.drawImage(chairImage, -CHAIR_SIZE / 2, -CHAIR_SIZE / 2, CHAIR_SIZE, CHAIR_SIZE);
+  ctx.restore();
 
   // ----- 구름 그림자 (땅 위 모든 것 위에, 글자·게이지 아래에) -----
   // 타원 3개를 겹쳐서 뭉게구름 모양을 만든다
