@@ -4,6 +4,14 @@ const ctx = canvas.getContext("2d");             // 그 도화지에 그릴 "붓
 // ===== 좌표와 크기 (여기 숫자만 바꾸면 그림이 바뀐다) =====
 // 화면 크기: 가로 800, 세로 600. (0, 0)은 왼쪽 위, y가 커지면 아래로 간다.
 
+// ===== 맵과 카메라 (스크롤) =====
+// 맵은 화면보다 세로로 길다. 아래 좌표들은 전부 "맵 위의 좌표"다 (맵 맨 위 = 0, 강의실이 있는 곳).
+// 화면은 맵의 일부만 비추는 카메라이고, 의자가 위로 가면 카메라도 따라 올라간다.
+const SCREEN_HEIGHT = 600;
+const WORLD_HEIGHT = SCREEN_HEIGHT * 3;     // 맵 전체 세로 길이 (화면 3장 = 1800)
+const CAMERA_FOLLOW_Y = 380;                // 스크롤 중에 의자가 머무르는 화면 속 높이
+let cameraY = WORLD_HEIGHT - SCREEN_HEIGHT; // 카메라가 비추는 맨 위의 맵 y (처음엔 맵 맨 아래 화면)
+
 // 캠퍼스 도로: 왼쪽부터 잔디 → 인도 → 차도 → 인도 → 잔디
 const GRASS_WIDTH = 90;       // 양쪽 잔디 폭
 const SIDEWALK_WIDTH = 40;    // 양쪽 인도 폭
@@ -17,7 +25,7 @@ const BUILDING_HEIGHT = 100;
 const CROSSWALK_Y = 120;
 const CROSSWALK_HEIGHT = 40;
 
-// 나무: 잔디 위 (이미지의 왼쪽 위 꼭짓점 좌표)
+// 나무: 잔디 위 (이미지의 왼쪽 위 꼭짓점 좌표). 나무와 풀은 화면 한 장 분량을 맵 전체에 반복해서 그린다
 const TREE_SIZE = 80;
 const TREES = [
   { x: 5, y: 130 },
@@ -44,14 +52,17 @@ const TREE_SWAY_ANGLE = 0.04;    // 나무가 좌우로 기우는 최대 각도 
 let clouds = [
   { x: -100, y: 260, speedX: 0.4, size: 1 },
   { x: 500, y: 470, speedX: 0.25, size: 0.8 },
+  { x: 150, y: 900, speedX: 0.3, size: 0.9 },
+  { x: 600, y: 1300, speedX: 0.35, size: 1 },
+  { x: -50, y: 1550, speedX: 0.2, size: 0.7 },
 ];
 const CLOUD_RADIUS = 110;        // 구름 그림자 가로 반지름 (size가 1일 때)
 
-// 플레이어(의자): 50×50, 화면 중간 아래부분에서 출발한다
+// 플레이어(의자): 50×50, 맵 맨 아래 화면의 중간 아래부분에서 출발한다
 // 방향키로 움직이므로 위치는 let (chairX, chairY는 왼쪽 위 꼭짓점)
 const CHAIR_SIZE = 50;
 let chairX = 375;
-let chairY = 490;
+let chairY = WORLD_HEIGHT - 110;
 
 // ===== 조작 설정 (여기 숫자를 바꿔 가며 조작 느낌을 튜닝한다) =====
 const CHAIR_SPEED = 5;        // 이동 속도: 한 프레임에 움직이는 픽셀 수 (최고 속도)
@@ -80,18 +91,22 @@ let students = [
   { x: 280, y: 330, speedX: 1 },
   { x: 520, y: 240, speedX: -0.7 },
   { x: 420, y: 200, speedX: 0.5 },
+  { x: 350, y: 720, speedX: 0.8 },
+  { x: 480, y: 960, speedX: -1 },
+  { x: 300, y: 1180, speedX: 0.6 },
+  { x: 450, y: 1420, speedX: -0.5 },
 ];
 
 // 자동차: 40×70, 오른쪽 차선을 따라 아래로 내려간다
 const CAR_X = 590;        // 차선 위치 (가로는 움직이지 않는다)
 const CAR_WIDTH = 40;
 const CAR_HEIGHT = 70;
-let carY = 300;           // 자동차의 세로 위치 (매 프레임 바뀐다)
+let carY = WORLD_HEIGHT - 300;   // 자동차의 세로 위치 (매 프레임 바뀐다)
 let carSpeedY = 6;        // 한 프레임에 아래로 6씩 (양수 = 아래, 음수 = 위)
 
 // 자동차 2: 왼쪽 차선을 따라 위로 올라간다 (반대 방향, 다른 속도)
 const CAR2_X = 170;       // 왼쪽 차선 위치 (오른쪽 자동차와 대칭)
-let car2Y = 450;          // 자동차 2의 세로 위치
+let car2Y = WORLD_HEIGHT - 150;  // 자동차 2의 세로 위치
 let car2SpeedY = -4;      // 한 프레임에 위로 4씩 (음수 = 위)
 
 // 학생이 걸어 다닐 수 있는 구역: 왼쪽 자동차 차선 오른쪽 ~ 오른쪽 자동차 차선 왼쪽
@@ -244,17 +259,24 @@ function gameLoop() {
     chairY = BUILDING_HEIGHT;
     chairVY = 0;
   }
-  if (chairY > canvas.height - CHAIR_SIZE) {
-    chairY = canvas.height - CHAIR_SIZE;
+  if (chairY > WORLD_HEIGHT - CHAIR_SIZE) {
+    chairY = WORLD_HEIGHT - CHAIR_SIZE;
     chairVY = 0;
   }
+
+  // 카메라가 의자를 따라간다: 의자가 화면 속 CAMERA_FOLLOW_Y 높이에 오게 맞춘다
+  // 단, 맵 맨 위보다 위나 맵 맨 아래보다 아래는 비추지 않는다
+  cameraY = chairY - CAMERA_FOLLOW_Y;
+  if (cameraY < 0) cameraY = 0;
+  if (cameraY > WORLD_HEIGHT - SCREEN_HEIGHT) cameraY = WORLD_HEIGHT - SCREEN_HEIGHT;
 
   // 자동차를 속도만큼 아래로 옮긴다
   carY = carY + carSpeedY;
 
-  // 화면 아래로 완전히 사라지면, 화면 위(건물 뒤)에서 다시 나타난다
-  if (carY > canvas.height) {
-    carY = -CAR_HEIGHT;
+  // 지금 화면(카메라) 아래로 완전히 사라지면, 화면 바로 위에서 다시 나타난다
+  // 맵 맨 위에서는 건물 뒤에서 나오는 것처럼 보인다
+  if (carY > cameraY + SCREEN_HEIGHT) {
+    carY = cameraY - CAR_HEIGHT;
   }
 
   // 흔들림 시계를 조금 앞으로 돌린다 (풀잎 흔들림에 쓴다)
@@ -263,9 +285,9 @@ function gameLoop() {
   // 자동차 2를 속도만큼 위로 옮긴다 (속도가 음수라 y가 줄어든다)
   car2Y = car2Y + car2SpeedY;
 
-  // 화면 위(건물 뒤)로 완전히 사라지면, 화면 아래에서 다시 나타난다
-  if (car2Y + CAR_HEIGHT < 0) {
-    car2Y = canvas.height;
+  // 지금 화면(카메라) 위로 완전히 사라지면, 화면 바로 아래에서 다시 나타난다
+  if (car2Y + CAR_HEIGHT < cameraY) {
+    car2Y = cameraY + SCREEN_HEIGHT;
   }
 
   // 학생들을 걷는 속도만큼 옮기고, 걷는 구역 끝(자동차 차선 앞)에 닿으면 방향을 뒤집는다
@@ -293,37 +315,47 @@ function gameLoop() {
 
   // ===== ③ 그리기: 바뀐 숫자대로 화면을 그린다 =====
 
+  // 카메라: 맵 전체를 cameraY만큼 위로 밀어 올려서 그린다
+  // 그러면 맵 위의 y = cameraY인 곳이 화면 맨 위(0)에 온다.
+  // 여기부터 restore 전까지는 전부 "맵 위의 좌표"로 그린다
+  ctx.save();
+  ctx.translate(0, -cameraY);
+
   // ----- 1. 잔디 (양쪽) -----
   // [새로 시도] 패턴: 작은 잔디 그림을 타일처럼 반복해서 칠한다
   ctx.fillStyle = ctx.createPattern(grassImage, "repeat");
-  ctx.fillRect(0, 0, GRASS_WIDTH, 600);                  // 왼쪽 잔디
-  ctx.fillRect(800 - GRASS_WIDTH, 0, GRASS_WIDTH, 600);  // 오른쪽 잔디
+  ctx.fillRect(0, 0, GRASS_WIDTH, WORLD_HEIGHT);                  // 왼쪽 잔디
+  ctx.fillRect(800 - GRASS_WIDTH, 0, GRASS_WIDTH, WORLD_HEIGHT);  // 오른쪽 잔디
 
   // 풀 포기: 포기마다 풀잎 3개. 끝부분이 sin(사인) 물결처럼 좌우로 흔들린다
   // 포기마다 위치를 더해서 흔들리는 타이밍을 다르게 → 바람이 지나가는 것처럼 보인다
+  // 화면 한 장 분량의 풀 배치를 맵 아래쪽으로 화면 높이만큼씩 내려가며 반복한다
   ctx.strokeStyle = "#2f7d32";
   ctx.lineWidth = 2;
-  for (const tuft of GRASS_TUFTS) {
-    const sway = Math.sin(swayTime + tuft.x * 0.05 + tuft.y * 0.03) * GRASS_SWAY;
-    for (let i = -1; i <= 1; i++) {
-      const rootX = tuft.x + i * 4;                        // 풀잎 뿌리 (4픽셀 간격)
-      const tipX = rootX + i * 3 + sway;                    // 풀잎 끝 (바깥으로 벌어지고 + 흔들림)
-      const tipY = tuft.y - GRASS_BLADE_HEIGHT + Math.abs(i) * 3;   // 가운데 잎이 제일 길다
-      ctx.beginPath();
-      ctx.moveTo(rootX, tuft.y);
-      ctx.quadraticCurveTo(rootX, tuft.y - GRASS_BLADE_HEIGHT / 2, tipX, tipY);   // 살짝 휜 풀잎
-      ctx.stroke();
+  for (let screenTop = 0; screenTop < WORLD_HEIGHT; screenTop += SCREEN_HEIGHT) {
+    for (const tuft of GRASS_TUFTS) {
+      const tuftY = screenTop + tuft.y;
+      const sway = Math.sin(swayTime + tuft.x * 0.05 + tuftY * 0.03) * GRASS_SWAY;
+      for (let i = -1; i <= 1; i++) {
+        const rootX = tuft.x + i * 4;                        // 풀잎 뿌리 (4픽셀 간격)
+        const tipX = rootX + i * 3 + sway;                    // 풀잎 끝 (바깥으로 벌어지고 + 흔들림)
+        const tipY = tuftY - GRASS_BLADE_HEIGHT + Math.abs(i) * 3;   // 가운데 잎이 제일 길다
+        ctx.beginPath();
+        ctx.moveTo(rootX, tuftY);
+        ctx.quadraticCurveTo(rootX, tuftY - GRASS_BLADE_HEIGHT / 2, tipX, tipY);   // 살짝 휜 풀잎
+        ctx.stroke();
+      }
     }
   }
 
   // ----- 2. 인도 (양쪽): 밝은 회색 + 보도블록 줄 -----
   ctx.fillStyle = "#bfbfbf";
-  ctx.fillRect(GRASS_WIDTH, 0, SIDEWALK_WIDTH, 600);     // 왼쪽 인도
-  ctx.fillRect(ROAD_RIGHT, 0, SIDEWALK_WIDTH, 600);      // 오른쪽 인도
+  ctx.fillRect(GRASS_WIDTH, 0, SIDEWALK_WIDTH, WORLD_HEIGHT);     // 왼쪽 인도
+  ctx.fillRect(ROAD_RIGHT, 0, SIDEWALK_WIDTH, WORLD_HEIGHT);      // 오른쪽 인도
 
   ctx.strokeStyle = "#a6a6a6";
   ctx.lineWidth = 1;
-  for (let y = 0; y <= 600; y += 40) {
+  for (let y = 0; y <= WORLD_HEIGHT; y += 40) {
     ctx.beginPath();
     ctx.moveTo(GRASS_WIDTH, y);
     ctx.lineTo(ROAD_LEFT, y);
@@ -334,16 +366,16 @@ function gameLoop() {
 
   // ----- 3. 차도: 진한 회색 아스팔트 -----
   ctx.fillStyle = "#4d4d4d";
-  ctx.fillRect(ROAD_LEFT, 0, ROAD_RIGHT - ROAD_LEFT, 600);
+  ctx.fillRect(ROAD_LEFT, 0, ROAD_RIGHT - ROAD_LEFT, WORLD_HEIGHT);
 
   // 차도 양쪽 흰 실선
   ctx.fillStyle = "#ffffff";
-  ctx.fillRect(ROAD_LEFT + 6, 0, 4, 600);
-  ctx.fillRect(ROAD_RIGHT - 10, 0, 4, 600);
+  ctx.fillRect(ROAD_LEFT + 6, 0, 4, WORLD_HEIGHT);
+  ctx.fillRect(ROAD_RIGHT - 10, 0, 4, WORLD_HEIGHT);
 
   // 가운데 노란 점선: 횡단보도 아래부터 30 그리고 20 쉬고를 반복
   ctx.fillStyle = "#f2c200";
-  for (let y = CROSSWALK_Y + CROSSWALK_HEIGHT + 20; y < 600; y += 50) {
+  for (let y = CROSSWALK_Y + CROSSWALK_HEIGHT + 20; y < WORLD_HEIGHT; y += 50) {
     ctx.fillRect(398, y, 4, 30);
   }
 
@@ -354,13 +386,17 @@ function gameLoop() {
   }
 
   // ----- 5. 나무 (잔디 위): 풀과 같은 흔들림 시계로 살짝 기울었다 돌아온다 -----
-  for (const tree of TREES) {
-    const angle = Math.sin(swayTime * 0.8 + tree.y * 0.02) * TREE_SWAY_ANGLE;
-    ctx.save();
-    ctx.translate(tree.x + TREE_SIZE / 2, tree.y + TREE_SIZE / 2);   // 나무 중심으로 붓을 옮긴다
-    ctx.rotate(angle);                                              // 그 자리에서 살짝 돌린다
-    ctx.drawImage(treeImage, -TREE_SIZE / 2, -TREE_SIZE / 2, TREE_SIZE, TREE_SIZE);
-    ctx.restore();
+  // 풀처럼 화면 한 장 분량의 배치를 맵 전체에 반복한다
+  for (let screenTop = 0; screenTop < WORLD_HEIGHT; screenTop += SCREEN_HEIGHT) {
+    for (const tree of TREES) {
+      const treeY = screenTop + tree.y;
+      const angle = Math.sin(swayTime * 0.8 + treeY * 0.02) * TREE_SWAY_ANGLE;
+      ctx.save();
+      ctx.translate(tree.x + TREE_SIZE / 2, treeY + TREE_SIZE / 2);   // 나무 중심으로 붓을 옮긴다
+      ctx.rotate(angle);                                             // 그 자리에서 살짝 돌린다
+      ctx.drawImage(treeImage, -TREE_SIZE / 2, -TREE_SIZE / 2, TREE_SIZE, TREE_SIZE);
+      ctx.restore();
+    }
   }
 
   // ----- 자동차 전조등 -----
@@ -457,6 +493,10 @@ function gameLoop() {
     ctx.ellipse(cloud.x + r * 0.55, cloud.y - r * 0.05, r * 0.45, r * 0.3, 0, 0, Math.PI * 2); // 오른쪽 작은 덩어리
     ctx.fill();
   }
+
+  // 카메라 끝: 붓을 원래대로 돌린다. 여기부터는 "화면 좌표"로 그린다
+  // 남은 시간과 게이지는 스크롤되지 않고 화면에 붙어 있어야 하기 때문이다
+  ctx.restore();
 
   // ----- 11. 글자: 남은 시간 (화면 위 가운데) -----
   // 글자가 잘 보이게 뒤에 반투명 검은 띠를 깐다 (커지는 글자가 들어가게 넉넉히)
