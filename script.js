@@ -466,7 +466,7 @@ function gameLoop() {
 
   // ----- 8. 고가도로: 그림자 → 난간 → 도로 순서로, 땅 위 모든 것 위에 -----
   // 의자가 고가 아래를 지나는 중이면 고가를 반투명하게 그려서, 아래에 있는 의자·장애물이 보이게 한다
-  if (!chairOnBridge && isNearBridge(chairCenterX, chairCenterY, ROAD_HALF + SIDEWALK_WIDTH + 60)) {
+  if (isChairUnderBridge()) {
     ctx.globalAlpha = 0.4;
   }
   drawRoad(true);
@@ -1103,6 +1103,23 @@ function updateChairTrack() {
     chairVX = chairVX * WALL_FRICTION;
     chairVY = chairVY * WALL_FRICTION;
   }
+}
+
+// ===== 의자가 지금 고가 아래를 지나는 중인가 =====
+// 고가가 의자 바로 위를 덮고 있고, 그 고가가 지금 달리는 길과 이어진 부분이 아니어야 한다
+// (고가로 올라가기 직전 코너에서는 고가가 가깝지만, 지금 달리는 길과 이어져 있으니 "아래"가 아니다)
+function isChairUnderBridge() {
+  if (chairOnBridge) return false;
+  const cx = chairX + CHAIR_SIZE / 2;
+  const cy = chairY + CHAIR_SIZE / 2;
+  const cover = ROAD_HALF + SIDEWALK_WIDTH + RAIL_WIDTH + CHAIR_SIZE / 2;   // 고가 폭 반 + 의자 반
+  for (let i = 0; i < trackSamples.length; i += 2) {
+    const q = trackSamples[i];
+    if (!q.bridge) continue;
+    if (Math.abs(i - chairTrackIndex) <= TRACK_SEARCH) continue;   // 지금 달리는 길과 이어진 고가는 빼고
+    if (Math.hypot(q.x - cx, q.y - cy) < cover) return true;
+  }
+  return false;
 }
 
 // ===== 이 위치가 고가도로 가까이(margin 안)에 있는가 =====
