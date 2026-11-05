@@ -118,6 +118,14 @@ let lastWheels = null;        // 직전 프레임의 뒷바퀴 위치 (자국 �
 let smokes = [];
 const SMOKE_LIFE = 40;        // 연기가 사라지기까지 걸리는 프레임 수
 
+// ===== 충돌 판정 (6장) =====
+// 판정 영역(히트박스): 그림을 감싸는 사각형을 그림보다 조금 작게 잡는다 (스치기만 해도 부딪히면 억울하니까)
+const CHAIR_HITBOX = 34;      // 의자 판정 사각형 한 변 (그림은 50)
+const CAR_HITBOX_SHRINK = 6;  // 자동차 판정은 그림(40×70)보다 가로·세로 6씩 작게
+const STUDENT_HITBOX = 30;    // 학생 판정 사각형 한 변 (그림은 52×36)
+const CONE_HITBOX = 20;       // 콘 판정 사각형 한 변 (그림은 24)
+let showHitbox = true;        // true면 판정 영역을 빨간 테두리로 그린다 (판정이 맞는지 눈으로 확인용)
+
 // 조작 방식 비교 실험용 스위치 (워크북 5장 Step 2 · Step 3)
 // "A" = keydown 안에서 직접 움직이는 방식 (꾹 누르면 끊기고, 대각선이 안 된다)
 // "B" = keys에 눌린 상태를 기록하고, 게임 루프에서 움직이는 방식 (매끄럽다)
@@ -340,6 +348,18 @@ function gameLoop() {
 
   // 의자가 트랙의 어디쯤인지, 길 위인지, 고가 위인지 알아낸다
   updateChairTrack();
+
+  // 충돌 검사: 의자 판정 사각형과 장애물 판정 사각형을 하나씩 비교한다
+  // 같은 층(땅 위 / 고가 위)에 있는 것끼리만 부딪힌다. 고가 아래를 지나는 차와는 안 부딪힌다
+  const chairBox = getChairHitbox();
+  const obstacleBoxes = getObstacleHitboxes();
+  for (let i = 0; i < obstacleBoxes.length; i++) {
+    const box = obstacleBoxes[i];
+    if (box.bridge !== chairOnBridge) continue;
+    if (checkCollision(chairBox, box)) {
+      console.log("충돌!", box.type);
+    }
+  }
 
   // 역주행 검사: 의자 속도를 트랙 진행 방향으로 나눠 본다 (내적: 양수 = 앞으로, 음수 = 거꾸로)
   const track = trackSamples[chairTrackIndex];
@@ -604,6 +624,20 @@ function gameLoop() {
     drawCar(cars[i].s, cars[i].lane, cars[i].speed > 0, true);
   }
   if (chairOnBridge) drawChair();
+
+  // ----- 판정 영역 (showHitbox가 true일 때만): 빨간 테두리 -----
+  if (showHitbox) {
+    ctx.strokeStyle = "#ff0000";
+    ctx.lineWidth = 2;
+    const chairBox = getChairHitbox();
+    ctx.strokeRect(chairBox.x, chairBox.y, chairBox.width, chairBox.height);
+    const boxes = getObstacleHitboxes();
+    for (let i = 0; i < boxes.length; i++) {
+      if (isNearChair(boxes[i].x, boxes[i].y, 100)) {
+        ctx.strokeRect(boxes[i].x, boxes[i].y, boxes[i].width, boxes[i].height);
+      }
+    }
+  }
 
   // ----- 9. 바퀴 연기 -----
   // 남은 수명이 적을수록 투명해지고, 계산 부분에서 size를 키워서 퍼지며 사라진다
@@ -1048,31 +1082,113 @@ function drawChair() {
 // s: 트랙 거리 / lane: 1 = 진행 방향 오른쪽 차선, -1 = 왼쪽 차선 / forward: 트랙 방향으로 가는 차인가
 // bridgeLevel: 지금 그리는 층 (그 층에 있는 차만 그린다)
 function drawCar(s, lane, forward, bridgeLevel) {
-  let p = pointAt(s);
-  if (s > TRACK_LENGTH) {
-    // 결승을 지난 차: 트랙 끝 방향으로 그대로 더 나아간 자리 (강의실 건물 안으로 들어간다)
-    p = { x: p.x + p.tx * (s - TRACK_LENGTH), y: p.y + p.ty * (s - TRACK_LENGTH), tx: p.tx, ty: p.ty, bridge: p.bridge };
-  }
-  if (p.bridge !== bridgeLevel) return;
-  // 차선 위치: 길 가운데에서 진행 방향의 옆으로 LANE_OFFSET만큼
-  const centerX = p.x - p.ty * lane * LANE_OFFSET;
-  const centerY = p.y + p.tx * lane * LANE_OFFSET;
-  if (!isNearChair(centerX, centerY, CAR_HEIGHT)) return;
-  // 자동차 그림은 앞이 위쪽이다. 트랙 방향으로 돌리고, 마주 오는 차는 180도 더 돌린다
-  let angle = Math.atan2(p.tx, -p.ty);
-  if (!forward) {
-    angle = angle + Math.PI;
-  }
+  const pose = carPose(s, lane, forward);
+  if (pose.bridge !== bridgeLevel) return;
+  if (!isNearChair(pose.x, pose.y, CAR_HEIGHT)) return;
 
   // save → 자동차 중심으로 붓을 옮기고 돌린다 → 그린다 → restore로 붓을 원래대로
   ctx.save();
-  ctx.translate(centerX, centerY);
-  ctx.rotate(angle);
+  ctx.translate(pose.x, pose.y);
+  ctx.rotate(pose.angle);
   // 돌린 붓 안에서는 자동차 앞이 항상 위쪽이라, 전조등은 앞 범퍼(-CAR_HEIGHT / 2)에서 위로(-1) 뻗는다
   // 자동차보다 먼저 그려서 빛이 차 밑에서 앞으로 뻗어 나오는 것처럼 보이게 한다
   drawHeadlights(0, -CAR_HEIGHT / 2, -1);
   ctx.drawImage(carImage, -CAR_WIDTH / 2, -CAR_HEIGHT / 2, CAR_WIDTH, CAR_HEIGHT);
   ctx.restore();
+}
+
+// ===== 자동차의 자리와 방향 =====
+// 그리기와 충돌 판정이 같은 계산을 써야 그림과 판정 영역이 어긋나지 않는다
+// s: 트랙 거리 / lane: 1 = 진행 방향 오른쪽 차선, -1 = 왼쪽 차선 / forward: 트랙 방향으로 가는 차인가
+function carPose(s, lane, forward) {
+  let p = pointAt(s);
+  if (s > TRACK_LENGTH) {
+    // 결승을 지난 차: 트랙 끝 방향으로 그대로 더 나아간 자리 (강의실 건물 안으로 들어간다)
+    p = { x: p.x + p.tx * (s - TRACK_LENGTH), y: p.y + p.ty * (s - TRACK_LENGTH), tx: p.tx, ty: p.ty, bridge: p.bridge };
+  }
+  // 자동차 그림은 앞이 위쪽이다. 트랙 방향으로 돌리고, 마주 오는 차는 180도 더 돌린다
+  let angle = Math.atan2(p.tx, -p.ty);
+  if (!forward) {
+    angle = angle + Math.PI;
+  }
+  return {
+    x: p.x - p.ty * lane * LANE_OFFSET,   // 차선 위치: 길 가운데에서 진행 방향의 옆으로 LANE_OFFSET만큼
+    y: p.y + p.tx * lane * LANE_OFFSET,
+    angle: angle,
+    bridge: p.bridge,
+  };
+}
+
+// ===== 충돌 판정: 두 사각형이 겹치는가 =====
+// a, b는 { x, y, width, height } (x, y는 왼쪽 위 꼭짓점)
+// 가로로도 겹치고 세로로도 겹치면 → 부딪힌 것이다. 네 조건이 모두 참이어야 한다
+function checkCollision(a, b) {
+  return a.x < b.x + b.width &&      // a의 왼쪽이 b의 오른쪽보다 왼쪽에 있고
+         a.x + a.width > b.x &&      // a의 오른쪽이 b의 왼쪽보다 오른쪽에 있고
+         a.y < b.y + b.height &&     // a의 위가 b의 아래보다 위에 있고
+         a.y + a.height > b.y;       // a의 아래가 b의 위보다 아래에 있으면
+}
+
+// ===== 가운데 (cx, cy)에 놓인 w×h 사각형 =====
+function boxAround(cx, cy, w, h) {
+  return { x: cx - w / 2, y: cy - h / 2, width: w, height: h };
+}
+
+// ===== 의자 판정 사각형 =====
+function getChairHitbox() {
+  return boxAround(chairX + CHAIR_SIZE / 2, chairY + CHAIR_SIZE / 2, CHAIR_HITBOX, CHAIR_HITBOX);
+}
+
+// ===== 장애물 판정 사각형 전부 (자동차·콘·건너는 학생·인도 학생) =====
+// 하나마다 { x, y, width, height, type: 무엇인지, bridge: 고가 위인지, index: 배열 몇 번째인지 }
+function getObstacleHitboxes() {
+  const boxes = [];
+
+  // 자동차: 돌아가 있으니, 돌아간 차를 감싸는 사각형의 가로·세로를 계산한다
+  // (세로로 선 차는 좁고 길게, 가로로 누운 차는 넓고 짧게)
+  for (let i = 0; i < cars.length; i++) {
+    const pose = carPose(cars[i].s, cars[i].lane, cars[i].speed > 0);
+    const w = CAR_WIDTH - CAR_HITBOX_SHRINK;
+    const h = CAR_HEIGHT - CAR_HITBOX_SHRINK;
+    const cos = Math.abs(Math.cos(pose.angle));
+    const sin = Math.abs(Math.sin(pose.angle));
+    const box = boxAround(pose.x, pose.y, w * cos + h * sin, w * sin + h * cos);
+    box.type = "car";
+    box.bridge = pose.bridge;
+    box.index = i;
+    boxes.push(box);
+  }
+
+  // 공사 콘
+  for (let i = 0; i < cones.length; i++) {
+    const pos = trackPosition(cones[i].s, cones[i].offset);
+    const box = boxAround(pos.x, pos.y, CONE_HITBOX, CONE_HITBOX);
+    box.type = "cone";
+    box.bridge = false;
+    box.index = i;
+    boxes.push(box);
+  }
+
+  // 횡단보도를 건너는 학생
+  for (let i = 0; i < crossers.length; i++) {
+    const pos = trackPosition(crossers[i].s, crossers[i].offset);
+    const box = boxAround(pos.x, pos.y, STUDENT_HITBOX, STUDENT_HITBOX);
+    box.type = "student";
+    box.bridge = false;
+    box.index = i;
+    boxes.push(box);
+  }
+
+  // 인도를 걷는 학생 (인도로 올라가면 부딪힐 수 있다)
+  for (let i = 0; i < students.length; i++) {
+    const pos = trackPosition(students[i].s, students[i].side * (ROAD_HALF + SIDEWALK_WIDTH / 2));
+    const box = boxAround(pos.x, pos.y, STUDENT_HITBOX, STUDENT_HITBOX);
+    box.type = "student";
+    box.bridge = false;
+    box.index = i;
+    boxes.push(box);
+  }
+  return boxes;
 }
 
 // ===== 미니맵 그리기 (화면 좌표) =====
