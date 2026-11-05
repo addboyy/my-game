@@ -15,24 +15,82 @@ const CAMERA_ZOOM = 0.7;                    // 화면 확대 배율 (1 = 원래 
 const VIEW_RADIUS = 650 / CAMERA_ZOOM;      // 화면이 돌아가도 보일 수 있는 의자 주변 범위 (이 밖은 그리지 않는다)
 let cameraAngle = 0;                        // 카메라가 바라보는 방향 (0 = 맵 위쪽)
 
-// ===== 트랙 (카트라이더 "빌리지 고가의 질주" 느낌: 긴 직선 + 직각 코너 + 헤어핀 + 고가도로) =====
-// 길 가운데 선이 지나가는 꼭짓점들. 출발부터 강의실(결승)까지 순서대로 직선으로 잇고,
-// 꼭짓점마다 모서리를 반지름 CORNER_RADIUS인 원호로 둥글게 깎는다.
+// ===== 트랙 목록 (난이도 3단계) =====
+// 트랙마다: 이름, 난이도, 제한 시간, 자동차 수, 콘 수, 꼭짓점(points)
+// 꼭짓점은 출발부터 강의실(결승)까지 순서대로 직선으로 잇고, 꼭짓점마다 모서리를 반지름 CORNER_RADIUS인 원호로 둥글게 깎는다
 // bridge: true인 점에서 다음 점까지의 직선은 고가도로다 (다른 길 위를 지나간다)
-const TRACK_POINTS = [
-  { x: 0, y: 400 },                      // 출발 (출발선 뒤 여유 공간)
-  { x: 0, y: -2500 },                    // 첫 긴 직선 → 오른쪽으로 직각
-  { x: 1800, y: -2500 },                 // → 아래로 직각
-  { x: 1800, y: -1200, bridge: true },   // 여기서 시작하는 긴 직선이 고가도로. 첫 직선 위를 가로지른다
-  { x: -1000, y: -1200 },                // 고가에서 내려와 위로 직각
-  { x: -1000, y: -4000 },                // 긴 직선 → 오른쪽으로 직각
-  { x: 600, y: -4000 },                  // 헤어핀 시작: 아래로 꺾어 내려갔다가
-  { x: 600, y: -3200 },
-  { x: 1500, y: -3200 },                 // 옆으로 건너가서 다시 위로 (U자로 되돌아가기)
-  { x: 1500, y: -5000 },                 // 긴 직선 → 왼쪽으로 직각
-  { x: 0, y: -5000 },                    // → 위로 직각
-  { x: 0, y: -6000 },                    // 강의실 앞 (결승)
+// 결승(마지막 점)이 맨 위에 있어야 한다 (그 위는 강의실 건물). 나란한 길끼리는 700 이상 떨어뜨린다
+const TRACKS = [
+  {
+    name: "캠퍼스 산책로",
+    level: "쉬움",
+    levelColor: "#7CFC00",
+    timeLimit: 30,
+    carCount: 2,
+    coneCount: 8,
+    points: [
+      { x: 0, y: 400 },        // 출발
+      { x: 0, y: -1600 },      // 직선 → 오른쪽
+      { x: 900, y: -1600 },    // → 위로
+      { x: 900, y: -3000 },    // → 왼쪽
+      { x: 0, y: -3000 },      // → 위로
+      { x: 0, y: -3800 },      // 강의실 앞 (결승)
+    ],
+  },
+  {
+    // 카트라이더 "빌리지 고가의 질주" 느낌: 긴 직선 + 직각 코너 + 헤어핀 + 고가도로
+    name: "고가의 질주",
+    level: "보통",
+    levelColor: "#ffd84d",
+    timeLimit: 50,
+    carCount: 4,
+    coneCount: 25,
+    points: [
+      { x: 0, y: 400 },                      // 출발 (출발선 뒤 여유 공간)
+      { x: 0, y: -2500 },                    // 첫 긴 직선 → 오른쪽으로 직각
+      { x: 1800, y: -2500 },                 // → 아래로 직각
+      { x: 1800, y: -1200, bridge: true },   // 여기서 시작하는 긴 직선이 고가도로. 첫 직선 위를 가로지른다
+      { x: -1000, y: -1200 },                // 고가에서 내려와 위로 직각
+      { x: -1000, y: -4000 },                // 긴 직선 → 오른쪽으로 직각
+      { x: 600, y: -4000 },                  // 헤어핀 시작: 아래로 꺾어 내려갔다가
+      { x: 600, y: -3200 },
+      { x: 1500, y: -3200 },                 // 옆으로 건너가서 다시 위로 (U자로 되돌아가기)
+      { x: 1500, y: -5000 },                 // 긴 직선 → 왼쪽으로 직각
+      { x: 0, y: -5000 },                    // → 위로 직각
+      { x: 0, y: -6000 },                    // 강의실 앞 (결승)
+    ],
+  },
+  {
+    // 뱀처럼 오르내리는 헤어핀 연속
+    name: "지그재그 캠퍼스",
+    level: "어려움",
+    levelColor: "#ff4d4d",
+    timeLimit: 45,
+    carCount: 6,
+    coneCount: 40,
+    points: [
+      { x: 0, y: 400 },        // 출발
+      { x: 0, y: -2400 },      // 위로 → 헤어핀
+      { x: 800, y: -2400 },
+      { x: 800, y: -600 },     // 아래로 → 헤어핀
+      { x: 1600, y: -600 },
+      { x: 1600, y: -2400 },   // 위로 → 헤어핀
+      { x: 2400, y: -2400 },
+      { x: 2400, y: -600 },    // 아래로 → 헤어핀
+      { x: 3200, y: -600 },
+      { x: 3200, y: -3200 },   // 긴 오르막 → 왼쪽
+      { x: 1600, y: -3200 },
+      { x: 1600, y: -4000 },   // 강의실 앞 (결승)
+    ],
+  },
 ];
+// 지금 달리는 트랙: 주소 뒤의 ?track=번호로 고른다 (없으면 선택 화면부터, 기본은 "보통")
+const TRACK_INDEX = readTrackIndex();
+const TRACK = TRACKS[TRACK_INDEX];
+const TRACK_POINTS = TRACK.points;
+const STARTED_FROM_MENU = new URLSearchParams(location.search).has("track");   // 선택 화면에서 골라서 들어왔나
+let menuIndex = TRACK_INDEX;   // 선택 화면에서 지금 고르고 있는 트랙
+let isNewRecord = false;       // 이번 판이 그 트랙 최고 점수인가
 const CORNER_RADIUS = 220;    // 코너 원호의 반지름. 클수록 코너가 완만하고, 작을수록 급해서 어렵다
                               // (ROAD_HALF + SIDEWALK_WIDTH = 190보다 커야 코너 안쪽 인도가 접히지 않는다)
 const TRACK_STEP = 8;         // 트랙을 몇 픽셀마다 점으로 나눠 둘지 (작을수록 매끄럽지만 느리다)
@@ -167,7 +225,7 @@ const CAR_HEIGHT = 70;
 // 자동차들: 배열 하나에 여러 대를 담는다. 한 대는 { s: 트랙 거리, speed: 속도, lane: 차선 }
 // speed가 양수면 의자와 같은 방향(오른쪽 차선, lane 1), 음수면 마주 오는 차(반대편 차선, lane -1)
 // CAR_COUNT 숫자만 바꾸면 코드를 고치지 않아도 자동차 수가 바뀐다
-const CAR_COUNT = 4;
+const CAR_COUNT = TRACK.carCount;   // 트랙마다 다르다 (트랙 목록에서)
 let cars = [];
 const CAR_RESPAWN_AHEAD = 2500;   // 자동차가 멀어지면 의자보다 이만큼 앞에 다시 나타난다
 const CAR_RESPAWN_BEHIND = 1500;  // 의자보다 이만큼 뒤로 처지면 다시 나타나게 한다
@@ -175,7 +233,7 @@ const CAR_INSIDE_BUILDING = 150;  // 결승을 지나 이만큼 더 가면 강�
 
 // 공사 콘: 차도 위에 가만히 놓인 장애물. 한 개는 { s: 트랙 거리, offset: 길 가운데에서 옆으로 떨어진 거리 }
 // offset이 양수면 진행 방향 오른쪽, 음수면 왼쪽
-const CONE_COUNT = 25;
+const CONE_COUNT = TRACK.coneCount; // 트랙마다 다르다
 const CONE_SIZE = 24;
 let cones = [];
 
@@ -203,14 +261,15 @@ const MINIMAP_X = SCREEN_WIDTH - MINIMAP_SIZE - 12;
 const MINIMAP_Y = 12;
 
 // 남은 시간 글자: 화면 위 가운데
-const TIME_LIMIT = 50;            // 제한 시간(초). 이 안에 강의실에 도착해야 한다
+const TIME_LIMIT = TRACK.timeLimit;   // 제한 시간(초). 트랙마다 다르다 (트랙 목록에서)
 let startTime = 0;                // 출발한 순간의 시각 (Date.now() 값, 밀리초)
 let remainingMs = TIME_LIMIT * 1000;   // 남은 시간 (밀리초)
 let timeLeft = TIME_LIMIT;        // 화면에 보여 줄 남은 시간 (정수 초)
 
 // ===== 게임 상태와 점수 (6장) =====
-// "countdown" = 출발 전 3, 2, 1 / "playing" = 달리는 중 / "finished" = 강의실 도착 (성공) / "gameover" = 시간 초과 (결석)
-let gameState = "countdown";
+// "select" = 트랙 선택 화면 / "countdown" = 출발 전 3, 2, 1 / "playing" = 달리는 중
+// "finished" = 강의실 도착 (성공) / "gameover" = 시간 초과 (결석)
+let gameState = STARTED_FROM_MENU ? "countdown" : "select";
 let score = 0;                    // 점수 = 도착했을 때 남은 시간 × 100 (시간 초과면 0)
 let finishSeconds = 0;            // 도착까지 걸린 시간 (초)
 const FINISH_MARGIN = 60;         // 결승 지점 이만큼 앞에 닿으면 도착으로 친다
@@ -278,7 +337,7 @@ for (const image of allImages) {
     loadedCount = loadedCount + 1;
     // 마지막 이미지까지 다 불러왔으면 게임 루프에 시동을 건다
     if (loadedCount === allImages.length) {
-      startCountdown();              // 3, 2, 1 카운트다운 시작 (GO!부터 시간이 흐른다)
+      if (gameState === "countdown") startCountdown();   // 트랙을 골라 들어왔으면 3, 2, 1 카운트다운 시작
       gameLoop();                    // 첫 시동 (그 뒤로는 루프가 스스로 자기를 부른다)
     }
   };
@@ -297,7 +356,7 @@ grassImage.src = "images/grass.png";
 // 키를 누르는 순간: "눌렸다"고 적어 둔다
 document.addEventListener("keydown", function (e) {
   // 방향키·스페이스바로 페이지가 스크롤되어 게임이 흔들리지 않게, 브라우저 기본 동작을 막는다
-  if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", " ", "Control"].includes(e.key)) {
+  if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", " ", "Control", "Enter"].includes(e.key)) {
     e.preventDefault();
   }
 
@@ -310,6 +369,18 @@ document.addEventListener("keydown", function (e) {
   // 한글 입력 상태면 R 자리 키가 "ㄱ"으로 들어오므로, 키 자리 이름(e.code)도 같이 본다
   if ((e.key === "r" || e.key === "R" || e.code === "KeyR") && (gameState === "finished" || gameState === "gameover")) {
     resetGame();
+  }
+
+  // 트랙 선택 화면: ← → 로 고르고 Enter로 출발
+  if (gameState === "select") {
+    if (e.key === "ArrowLeft") menuIndex = (menuIndex + TRACKS.length - 1) % TRACKS.length;
+    if (e.key === "ArrowRight") menuIndex = (menuIndex + 1) % TRACKS.length;
+    if (e.key === "Enter") chooseTrack(menuIndex);
+  }
+  // T 키: 결과 화면에서 트랙 선택으로 (한글 입력 상태의 "ㅅ"도 받게 e.code도 본다)
+  if ((e.key === "t" || e.key === "T" || e.code === "KeyT") && (gameState === "finished" || gameState === "gameover")) {
+    menuIndex = TRACK_INDEX;
+    gameState = "select";
   }
 
   if (CONTROL_METHOD === "A") {
@@ -706,14 +777,17 @@ function gameLoop() {
   // ----- 15. 결과 화면: 도착(성공) 또는 게임 오버(시간 초과) -----
   if (gameState === "finished") {
     drawResultScreen("강의실 도착!", "#ffd84d", [
-      "점수: " + score,
+      TRACK.name + " (" + TRACK.level + ")",
+      "점수: " + score + (isNewRecord ? "  신기록!" : ""),
       "기록: " + finishSeconds.toFixed(2) + "초",
+      "최고 점수: " + loadBest(TRACK_INDEX),
     ]);
   } else if (gameState === "gameover") {
     drawResultScreen("GAME OVER", "#ff4d4d", [
       "지각! 결석 처리되었어요",
       "최종 점수: " + score,
       "강의실까지 " + Math.floor(chairS / TRACK_LENGTH * 100) + "% 왔어요",
+      "최고 점수: " + loadBest(TRACK_INDEX),
     ]);
   }
 
@@ -770,6 +844,11 @@ function gameLoop() {
       ctx.strokeText("GO! 순간에 ↑를 누르면 출발 부스터", SCREEN_WIDTH / 2, 330);
       ctx.fillText("GO! 순간에 ↑를 누르면 출발 부스터", SCREEN_WIDTH / 2, 330);
     }
+  }
+
+  // ----- 19. 트랙 선택 화면 (맨 위에 덮는다) -----
+  if (gameState === "select") {
+    drawTrackSelect();
   }
 
   // ===== ④ 다음 프레임 예약: 다음 그림 때 gameLoop를 또 불러 달라고 부탁한다 =====
@@ -1037,6 +1116,7 @@ function updateGame() {
     gameState = "finished";
     score = Math.floor(remainingMs / 10);                       // 남은 ms ÷ 10 = 남은 초 × 100
     finishSeconds = (TIME_LIMIT * 1000 - remainingMs) / 1000;   // 걸린 시간 (초)
+    isNewRecord = saveBest(TRACK_INDEX, score);                 // 이 트랙 최고 점수면 저장
   } else if (remainingMs === 0) {
     // 시간 초과: 지각 → 결석 (기획서의 "리타이어")
     gameState = "gameover";
@@ -1090,9 +1170,86 @@ function resetGame() {
   startCountdown();   // 바로 달리지 않고 3, 2, 1 카운트다운부터
 }
 
+// ===== 트랙 고르기 =====
+// 주소 뒤의 ?track=번호를 읽는다. 없거나 이상하면 1번(보통)
+function readTrackIndex() {
+  const params = new URLSearchParams(location.search);
+  if (!params.has("track")) return 1;   // 주소에 없으면 Number(null)이 0이 되니까 먼저 확인한다
+  const n = Number(params.get("track"));
+  if (Number.isInteger(n) && n >= 0 && n < TRACKS.length) return n;
+  return 1;
+}
+
+// 선택한 트랙으로 출발한다. 지금 트랙이면 그대로 다시 시작하고,
+// 다른 트랙이면 그 트랙 번호를 주소에 붙여 페이지를 다시 불러온다
+// (길·나무·장애물은 시작할 때 한 번 만들기 때문에, 다시 불러오는 게 가장 깔끔하다)
+function chooseTrack(index) {
+  if (index === TRACK_INDEX) {
+    resetGame();
+  } else {
+    location.search = "?track=" + index;
+  }
+}
+
+// ===== 트랙별 최고 점수 (브라우저에 저장, 새로고침해도 남는다) =====
+function loadBest(index) {
+  try {
+    return Number(localStorage.getItem("chairDrift.best." + index)) || 0;
+  } catch (e) {
+    return 0;   // 저장소를 못 쓰는 환경이면 기록 없이
+  }
+}
+// 더 높은 점수면 저장하고 true를 돌려준다
+function saveBest(index, value) {
+  if (value <= loadBest(index)) return false;
+  try {
+    localStorage.setItem("chairDrift.best." + index, String(value));
+  } catch (e) {
+    // 저장소를 못 쓰면 저장만 건너뛴다
+  }
+  return true;
+}
+
+// ===== 트랙 미리보기: 꼭짓점을 이어 작은 지도로 그린다 (g = 2D 붓) =====
+function drawTrackPreview(g, points, x, y, width, height, color) {
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  for (const p of points) {
+    minX = Math.min(minX, p.x);
+    maxX = Math.max(maxX, p.x);
+    minY = Math.min(minY, p.y);
+    maxY = Math.max(maxY, p.y);
+  }
+  const scale = Math.min(width / (maxX - minX || 1), height / (maxY - minY || 1)) * 0.85;
+  const offsetX = x + (width - (maxX - minX) * scale) / 2;
+  const offsetY = y + (height - (maxY - minY) * scale) / 2;
+  g.strokeStyle = color;
+  g.lineWidth = 4;
+  g.lineJoin = "round";
+  g.beginPath();
+  for (let i = 0; i < points.length; i++) {
+    const px = offsetX + (points[i].x - minX) * scale;
+    const py = offsetY + (points[i].y - minY) * scale;
+    if (i === 0) g.moveTo(px, py);
+    else g.lineTo(px, py);
+  }
+  g.stroke();
+  // 출발: 빨간 점, 결승(강의실): 노란 점
+  const first = points[0];
+  const last = points[points.length - 1];
+  g.fillStyle = "#ff4d4d";
+  g.beginPath();
+  g.arc(offsetX + (first.x - minX) * scale, offsetY + (first.y - minY) * scale, 5, 0, Math.PI * 2);
+  g.fill();
+  g.fillStyle = "#ffd84d";
+  g.beginPath();
+  g.arc(offsetX + (last.x - minX) * scale, offsetY + (last.y - minY) * scale, 5, 0, Math.PI * 2);
+  g.fill();
+}
+
 // ===== 카운트다운 시작: 3, 2, 1, GO! 가 끝나야 달릴 수 있다 =====
 function startCountdown() {
   gameState = "countdown";
+  isNewRecord = false;
   countdownStart = Date.now();
   upPressTime = 0;
   startBoostChecked = false;
@@ -1620,6 +1777,59 @@ function getObstacleHitboxes() {
   return boxes;
 }
 
+// ===== 트랙 선택 화면 그리기 (화면 좌표) =====
+// 트랙 카드를 가로로 늘어놓고, 고르고 있는 카드는 노란 테두리로 크게
+function drawTrackSelect() {
+  ctx.fillStyle = "rgba(0, 0, 0, 0.75)";
+  ctx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillStyle = "#ffffff";
+  ctx.font = "bold 40px sans-serif";
+  ctx.fillText("트랙 선택", SCREEN_WIDTH / 2, 70);
+
+  const cardWidth = 220;
+  const cardHeight = 330;
+  const gap = 25;
+  const left = (SCREEN_WIDTH - (cardWidth * TRACKS.length + gap * (TRACKS.length - 1))) / 2;
+  for (let i = 0; i < TRACKS.length; i++) {
+    const track = TRACKS[i];
+    const x = left + i * (cardWidth + gap);
+    const y = 120;
+    const selected = i === menuIndex;
+    // 카드 바탕과 테두리
+    ctx.fillStyle = selected ? "rgba(60, 60, 60, 0.95)" : "rgba(30, 30, 30, 0.9)";
+    ctx.fillRect(x, y, cardWidth, cardHeight);
+    ctx.strokeStyle = selected ? "#ffd84d" : "#666666";
+    ctx.lineWidth = selected ? 4 : 2;
+    ctx.strokeRect(x, y, cardWidth, cardHeight);
+    // 이름과 난이도
+    ctx.fillStyle = "#ffffff";
+    ctx.font = "bold 22px sans-serif";
+    ctx.fillText(track.name, x + cardWidth / 2, y + 30);
+    ctx.fillStyle = track.levelColor;
+    ctx.font = "bold 18px sans-serif";
+    ctx.fillText(track.level, x + cardWidth / 2, y + 58);
+    // 작은 지도
+    drawTrackPreview(ctx, track.points, x + 20, y + 75, cardWidth - 40, 160, "#ffffff");
+    // 제한 시간과 최고 점수
+    ctx.fillStyle = "#cccccc";
+    ctx.font = "15px sans-serif";
+    ctx.fillText("제한 시간 " + track.timeLimit + "초 · 차 " + track.carCount + "대", x + cardWidth / 2, y + 265);
+    ctx.fillStyle = "#ffd84d";
+    ctx.font = "bold 16px sans-serif";
+    const best = loadBest(i);
+    ctx.fillText(best > 0 ? "최고 점수 " + best : "기록 없음", x + cardWidth / 2, y + 295);
+  }
+
+  ctx.fillStyle = "#ffffff";
+  ctx.font = "bold 18px sans-serif";
+  ctx.fillText("← → 로 고르고  Enter 로 출발", SCREEN_WIDTH / 2, 500);
+  ctx.fillStyle = "#aaaaaa";
+  ctx.font = "15px sans-serif";
+  ctx.fillText("조작: ↑↓ 앞뒤 · ←→ 핸들 · Shift 드리프트 · Ctrl 부스터", SCREEN_WIDTH / 2, 535);
+}
+
 // ===== 결과 화면 그리기 (화면 좌표) =====
 // 화면을 어둡게 덮고, 가운데에 큰 제목 → 줄마다 결과 → 맨 아래 작게 "R 키를 눌러 다시 시작"
 function drawResultScreen(title, titleColor, lines) {
@@ -1635,12 +1845,12 @@ function drawResultScreen(title, titleColor, lines) {
   ctx.fillStyle = "#ffffff";
   ctx.font = "bold 26px sans-serif";
   for (let i = 0; i < lines.length; i++) {
-    ctx.fillText(lines[i], SCREEN_WIDTH / 2, 280 + i * 42);
+    ctx.fillText(lines[i], SCREEN_WIDTH / 2, 270 + i * 40);
   }
 
   ctx.fillStyle = "#cccccc";
   ctx.font = "18px sans-serif";
-  ctx.fillText("R 키를 눌러 다시 시작", SCREEN_WIDTH / 2, 480);
+  ctx.fillText("R: 다시 달리기   ·   T: 트랙 선택", SCREEN_WIDTH / 2, 500);
 }
 
 // ===== 미니맵 그리기 (화면 좌표) =====
