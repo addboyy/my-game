@@ -126,6 +126,20 @@ const STUDENT_HITBOX = 30;    // 학생 판정 사각형 한 변 (그림은 52×
 const CONE_HITBOX = 20;       // 콘 판정 사각형 한 변 (그림은 24)
 let showHitbox = true;        // true면 판정 영역을 빨간 테두리로 그린다 (판정이 맞는지 눈으로 확인용)
 
+// 부딪혔을 때 효과 (기획서: 학생 = 슬로우, 자동차 = 튕겨 나가고 잠시 스턴). 시간은 전부 프레임 수 (60 ≈ 1초)
+const SLOW_FRAMES = 60;       // 학생·콘에 부딪히면 이만큼 느려진다
+const SLOW_SPEED_RATE = 0.4;  // 슬로우 중 최고 속도 비율
+const STUN_FRAMES = 45;       // 자동차에 부딪히면 이만큼 조작이 안 된다
+const STUN_SPIN = 0.25;       // 스턴 중 의자가 한 프레임에 빙글 도는 각도
+const CAR_BOUNCE = 14;        // 자동차에 부딪혀 튕겨 나가는 속도
+const HIT_COOLDOWN = 60;      // 한 번 부딪힌 뒤 이만큼은 무적 (매 프레임 계속 부딪히지 않게)
+let slowTimer = 0;            // 남은 슬로우 프레임 (0이면 정상)
+let stunTimer = 0;            // 남은 스턴 프레임
+let hitCooldown = 0;          // 남은 무적 프레임
+let hitMessage = "";          // 의자 위에 띄울 글자 ("슬로우!", "쾅! 스턴")
+let hitMessageTimer = 0;      // 글자를 띄울 남은 프레임
+let flashTimer = 0;           // 화면이 빨갛게 번쩍이는 남은 프레임 (자동차 충돌)
+
 // 조작 방식 비교 실험용 스위치 (워크북 5장 Step 2 · Step 3)
 // "A" = keydown 안에서 직접 움직이는 방식 (꾹 누르면 끊기고, 대각선이 안 된다)
 // "B" = keys에 눌린 상태를 기록하고, 게임 루프에서 움직이는 방식 (매끄럽다)
@@ -290,11 +304,18 @@ function gameLoop() {
     if (keys["ArrowLeft"]) steer = steer - 1;
     if (keys["ArrowRight"]) steer = steer + 1;
 
+    // 스턴 중에는 키를 눌러도 소용없다. 의자는 빙글 돌면서 튕겨 나가던 방향으로 미끄러진다
+    if (stunTimer > 0) {
+      throttle = 0;
+      steer = 0;
+      chairAngle = chairAngle + STUN_SPIN;
+    }
+
     // 2) Shift를 누르고 있으면 드리프트: 접지력이 약해져서 미끄러지고, 핸들은 더 잘 돈다
     let grip = GRIP;
     let turnRate = TURN_RATE;
-    if (keys["Shift"]) {
-      grip = DRIFT_GRIP;
+    if (keys["Shift"] || stunTimer > 0) {
+      grip = DRIFT_GRIP;            // 스턴 중에도 접지력이 약해서 튕긴 힘이 오래 간다
       turnRate = DRIFT_TURN_RATE;
     }
 
@@ -305,6 +326,10 @@ function gameLoop() {
     let maxSpeed = CHAIR_SPEED;
     if (!chairOnRoad) {
       maxSpeed = CHAIR_SPEED * GRASS_SPEED_RATE;
+    }
+    // 학생·콘에 부딪혀 슬로우 중이면 더 느려진다
+    if (slowTimer > 0) {
+      maxSpeed = maxSpeed * SLOW_SPEED_RATE;
     }
 
     // 5) 목표 속도 = 의자가 바라보는 방향 × 최고 속도 × throttle
@@ -351,15 +376,26 @@ function gameLoop() {
 
   // 충돌 검사: 의자 판정 사각형과 장애물 판정 사각형을 하나씩 비교한다
   // 같은 층(땅 위 / 고가 위)에 있는 것끼리만 부딪힌다. 고가 아래를 지나는 차와는 안 부딪힌다
-  const chairBox = getChairHitbox();
-  const obstacleBoxes = getObstacleHitboxes();
-  for (let i = 0; i < obstacleBoxes.length; i++) {
-    const box = obstacleBoxes[i];
-    if (box.bridge !== chairOnBridge) continue;
-    if (checkCollision(chairBox, box)) {
-      console.log("충돌!", box.type);
+  // 무적 시간(hitCooldown) 중에는 검사하지 않는다
+  if (hitCooldown === 0) {
+    const chairBox = getChairHitbox();
+    const obstacleBoxes = getObstacleHitboxes();
+    for (let i = 0; i < obstacleBoxes.length; i++) {
+      const box = obstacleBoxes[i];
+      if (box.bridge !== chairOnBridge) continue;
+      if (checkCollision(chairBox, box)) {
+        hitObstacle(box);
+        break;   // 한 프레임에 하나만 처리한다 (부딪힌 뒤엔 무적이니까)
+      }
     }
   }
+
+  // 효과 타이머들을 1프레임씩 줄인다 (0 아래로는 안 내려간다)
+  slowTimer = Math.max(0, slowTimer - 1);
+  stunTimer = Math.max(0, stunTimer - 1);
+  hitCooldown = Math.max(0, hitCooldown - 1);
+  hitMessageTimer = Math.max(0, hitMessageTimer - 1);
+  flashTimer = Math.max(0, flashTimer - 1);
 
   // 역주행 검사: 의자 속도를 트랙 진행 방향으로 나눠 본다 (내적: 양수 = 앞으로, 음수 = 거꾸로)
   const track = trackSamples[chairTrackIndex];
@@ -628,7 +664,7 @@ function gameLoop() {
   // ----- 판정 영역 (showHitbox가 true일 때만): 빨간 테두리 -----
   if (showHitbox) {
     ctx.strokeStyle = "#ff0000";
-    ctx.lineWidth = 2;
+    ctx.lineWidth = 3;
     const chairBox = getChairHitbox();
     ctx.strokeRect(chairBox.x, chairBox.y, chairBox.width, chairBox.height);
     const boxes = getObstacleHitboxes();
@@ -702,6 +738,24 @@ function gameLoop() {
   // 카메라 끝: 붓을 원래대로 돌린다. 여기부터는 "화면 좌표"로 그린다
   // 남은 시간과 게이지는 스크롤되지 않고 화면에 붙어 있어야 하기 때문이다
   ctx.restore();
+
+  // 자동차에 부딪힌 순간 화면 전체가 빨갛게 번쩍였다가 사라진다
+  if (flashTimer > 0) {
+    ctx.fillStyle = "rgba(255, 0, 0, " + (0.35 * flashTimer / 15) + ")";
+    ctx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+  }
+
+  // 부딪혔을 때 의자 위에 "슬로우!" / "쾅! 스턴" 글자 (화면에 그려서 똑바로 보이게)
+  if (hitMessageTimer > 0) {
+    ctx.fillStyle = hitMessage === "슬로우!" ? "#7ec8ff" : "#ff5c5c";
+    ctx.strokeStyle = "#000000";
+    ctx.lineWidth = 4;
+    ctx.font = "bold 22px sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.strokeText(hitMessage, SCREEN_WIDTH / 2, CAMERA_ANCHOR_Y - 60);
+    ctx.fillText(hitMessage, SCREEN_WIDTH / 2, CAMERA_ANCHOR_Y - 60);
+  }
 
   // 드리프트 중이면 의자 위에 "DRIFT!" 글자를 띄운다
   // 맵이 아니라 화면에 그려야 화면이 돌아가도 글자가 똑바로 보인다. 의자는 항상 화면의 (가운데, CAMERA_ANCHOR_Y) 근처에 있다
@@ -1072,6 +1126,10 @@ function drawSkidMarks(bridgeLevel) {
 // ===== 플레이어 의자 그리기: 바라보는 방향(chairAngle)으로 돌려서 =====
 function drawChair() {
   ctx.save();
+  // 무적 시간에는 깜빡인다 (5프레임마다 반투명 ↔ 불투명)
+  if (hitCooldown > 0 && Math.floor(hitCooldown / 5) % 2 === 0) {
+    ctx.globalAlpha = 0.35;
+  }
   ctx.translate(chairX + CHAIR_SIZE / 2, chairY + CHAIR_SIZE / 2);   // 의자 중심으로 붓을 옮긴다
   ctx.rotate(chairAngle);
   ctx.drawImage(chairImage, -CHAIR_SIZE / 2, -CHAIR_SIZE / 2, CHAIR_SIZE, CHAIR_SIZE);
@@ -1127,6 +1185,34 @@ function checkCollision(a, b) {
          a.x + a.width > b.x &&      // a의 오른쪽이 b의 왼쪽보다 오른쪽에 있고
          a.y < b.y + b.height &&     // a의 위가 b의 아래보다 위에 있고
          a.y + a.height > b.y;       // a의 아래가 b의 위보다 아래에 있으면
+}
+
+// ===== 장애물에 부딪혔을 때 (기획서: 학생 = 슬로우, 자동차 = 튕겨 나가고 스턴) =====
+function hitObstacle(box) {
+  hitCooldown = HIT_COOLDOWN;   // 잠깐 무적
+  hitMessageTimer = 50;
+
+  if (box.type === "car") {
+    // 자동차 → 의자: 자동차 가운데에서 의자 가운데로 향하는 방향으로 튕겨 나간다
+    const dx = (chairX + CHAIR_SIZE / 2) - (box.x + box.width / 2);
+    const dy = (chairY + CHAIR_SIZE / 2) - (box.y + box.height / 2);
+    const length = Math.hypot(dx, dy) || 1;   // 0으로 나누지 않게 (완전히 겹쳤으면 1)
+    chairVX = dx / length * CAR_BOUNCE;
+    chairVY = dy / length * CAR_BOUNCE;
+    stunTimer = STUN_FRAMES;
+    flashTimer = 15;
+    hitMessage = "쾅! 스턴";
+  } else {
+    // 학생·콘 → 슬로우: 속도를 확 줄이고 한동안 느리게
+    chairVX = chairVX * 0.3;
+    chairVY = chairVY * 0.3;
+    slowTimer = SLOW_FRAMES;
+    hitMessage = "슬로우!";
+    // 콘은 튕겨 나가서 사라진다 (배열에서 빼낸다)
+    if (box.type === "cone") {
+      cones.splice(box.index, 1);
+    }
+  }
 }
 
 // ===== 가운데 (cx, cy)에 놓인 w×h 사각형 =====
