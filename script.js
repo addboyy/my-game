@@ -41,7 +41,10 @@ const TRACK_STEP = 8;         // 트랙을 몇 픽셀마다 점으로 나눠 둘
 const ROAD_HALF = 130;        // 차도 반폭 (차도 전체 폭 260 = 의자 5개 정도)
 const SIDEWALK_WIDTH = 60;    // 양쪽 인도 폭 (학생 어깨 폭 52가 들어가게)
 const LANE_OFFSET = 65;       // 자동차 차선 가운데가 길 가운데 선에서 떨어진 거리
-const GRASS_SPEED_RATE = 0.4; // 잔디 위에서는 최고 속도가 이 비율로 줄어든다 (길을 벗어나면 느려진다)
+const RAIL_WIDTH = 8;         // 인도 바깥 끝 가드레일 두께. 의자는 이 밖(잔디)으로 나갈 수 없다
+const WALL_BOUNCE = 0.3;      // 가드레일에 부딪히면 바깥으로 가던 속도의 이 비율만큼 안쪽으로 튕긴다
+const WALL_FRICTION = 0.92;   // 가드레일에 긁히는 동안 매 프레임 속도가 이 비율로 줄어든다
+const TRACK_SEARCH = 150;     // 의자 위치를 찾을 때 직전 자리 앞뒤로 볼 트랙 점 수 (150점 = 1200픽셀)
 const BRIDGE_SHADOW = 30;     // 고가도로 그림자가 땅에 비치는 거리 (높이 있어 보이게)
 const START_LINE_S = 400;     // 출발선 위치 (트랙 시작에서 달린 거리)
 
@@ -83,7 +86,6 @@ let chairY = chairStart.y - CHAIR_SIZE / 2;
 // 의자가 지금 트랙의 어디쯤인가 (매 프레임 updateChairTrack이 계산한다)
 let chairTrackIndex = 0;      // 가장 가까운 트랙 점 번호
 let chairS = 0;               // 트랙 시작에서 달린 거리 (자동차를 의자 근처에 다시 나타나게 할 때 쓴다)
-let chairOnRoad = true;       // 길(차도·인도) 위인가 (아니면 잔디)
 let chairOnBridge = false;    // 고가도로 위인가 (고가 아래를 지날 때와 그리는 순서가 달라진다)
 
 // 역주행 경고: 트랙 진행 방향과 반대로 움직이는 상태가 잠깐 이어지면 화면에 경고를 띄운다
@@ -463,11 +465,16 @@ function gameLoop() {
   if (!chairOnBridge) drawChair();
 
   // ----- 8. 고가도로: 그림자 → 난간 → 도로 순서로, 땅 위 모든 것 위에 -----
+  // 의자가 고가 아래를 지나는 중이면 고가를 반투명하게 그려서, 아래에 있는 의자·장애물이 보이게 한다
+  if (!chairOnBridge && isNearBridge(chairCenterX, chairCenterY, ROAD_HALF + SIDEWALK_WIDTH + 60)) {
+    ctx.globalAlpha = 0.4;
+  }
   drawRoad(true);
   drawSkidMarks(true);
   for (let i = 0; i < cars.length; i++) {
     drawCar(cars[i].s, cars[i].lane, cars[i].speed > 0, true);
   }
+  ctx.globalAlpha = 1;
   if (chairOnBridge) drawChair();
 
   // ----- 판정 영역 (showHitbox가 true일 때만): 빨간 테두리 -----
@@ -705,11 +712,8 @@ function updateGame() {
     // 3) 핸들: 의자가 바라보는 방향을 돌린다 (바퀴 달린 의자라 제자리에서도 돈다)
     chairAngle = chairAngle + steer * turnRate;
 
-    // 4) 길(차도·인도)을 벗어나 잔디 위에 있으면 최고 속도가 줄어든다
+    // 4) 최고 속도
     let maxSpeed = CHAIR_SPEED;
-    if (!chairOnRoad) {
-      maxSpeed = CHAIR_SPEED * GRASS_SPEED_RATE;
-    }
     // 학생·콘에 부딪혀 슬로우 중이면 더 느려진다
     if (slowTimer > 0) {
       maxSpeed = maxSpeed * SLOW_SPEED_RATE;
@@ -886,7 +890,7 @@ function updateGame() {
   timeLeft = Math.ceil(remainingMs / 1000);   // 화면에 보여 줄 정수 초 (60 → … → 1 → 0)
 
   // 도착: 길 위에서 결승(강의실 문 앞)에 닿으면 성공. 점수 = 남은 시간 × 100
-  if (chairOnRoad && chairS >= TRACK_LENGTH - FINISH_MARGIN) {
+  if (chairS >= TRACK_LENGTH - FINISH_MARGIN) {
     gameState = "finished";
     score = Math.floor(remainingMs / 10);                       // 남은 ms ÷ 10 = 남은 초 × 100
     finishSeconds = (TIME_LIMIT * 1000 - remainingMs) / 1000;   // 걸린 시간 (초)
@@ -910,7 +914,6 @@ function resetGame() {
   cameraAngle = chairAngle;
   chairTrackIndex = 0;
   chairS = 0;
-  chairOnRoad = true;
   chairOnBridge = false;
 
   // 장애물: 자동차·콘(부딪혀 사라진 것까지)·건너는 학생을 새로 배치
@@ -1059,14 +1062,14 @@ function pointAt(s) {
 function updateChairTrack() {
   const cx = chairX + CHAIR_SIZE / 2;
   const cy = chairY + CHAIR_SIZE / 2;
-  const roadLimit = (ROAD_HALF + SIDEWALK_WIDTH) * (ROAD_HALF + SIDEWALK_WIDTH);
-  let nearest = 0;                // 제일 가까운 점
-  let nearestDist = Infinity;
-  let nearestOnRoad = -1;         // 길 안쪽이면서, 직전 위치와 이어지는 점 중 제일 가까운 점
-  let nearestOnRoadDist = Infinity;
-  let anyOnRoad = -1;             // 직전 위치와 안 이어져도 길 안쪽인 점 (잔디에서 다른 길로 들어왔을 때)
 
-  for (let i = 0; i < trackSamples.length; i++) {
+  // 1) 직전에 있던 트랙 점 앞뒤 TRACK_SEARCH개 중에서만 가장 가까운 점을 찾는다
+  //    트랙 전체에서 찾으면, 고가와 그 아래 길이 겹치는 곳에서 다른 층의 길로 건너뛰어 버린다
+  const from = Math.max(0, chairTrackIndex - TRACK_SEARCH);
+  const to = Math.min(trackSamples.length - 1, chairTrackIndex + TRACK_SEARCH);
+  let nearest = chairTrackIndex;
+  let nearestDist = Infinity;
+  for (let i = from; i <= to; i++) {
     const dx = trackSamples[i].x - cx;
     const dy = trackSamples[i].y - cy;
     const dist = dx * dx + dy * dy;   // 거리의 제곱 (비교만 하니 제곱근을 안 구해도 된다)
@@ -1074,27 +1077,41 @@ function updateChairTrack() {
       nearestDist = dist;
       nearest = i;
     }
-    if (dist <= roadLimit) {
-      if (anyOnRoad < 0) anyOnRoad = i;
-      if (Math.abs(i - chairTrackIndex) < 150 && dist < nearestOnRoadDist) {
-        nearestOnRoadDist = dist;
-        nearestOnRoad = i;
-      }
-    }
   }
+  chairTrackIndex = nearest;
+  const p = trackSamples[nearest];
+  chairS = p.s;
+  chairOnBridge = p.bridge;
 
-  if (nearestOnRoad >= 0) {
-    chairTrackIndex = nearestOnRoad;
-    chairOnRoad = true;
-  } else if (anyOnRoad >= 0) {
-    chairTrackIndex = nearest;
-    chairOnRoad = true;
-  } else {
-    chairTrackIndex = nearest;
-    chairOnRoad = false;
+  // 2) 가드레일: 의자 몸통이 인도 바깥 끝(가드레일)을 넘으면 안쪽으로 되돌린다
+  const limit = ROAD_HALF + SIDEWALK_WIDTH - CHAIR_HITBOX / 2;   // 길 가운데에서 의자 중심이 갈 수 있는 거리
+  const dist = Math.sqrt(nearestDist);
+  if (dist > limit) {
+    // 길 가운데 → 의자 쪽 방향 (길이 1). 이 방향이 "바깥"이다
+    const outX = (cx - p.x) / dist;
+    const outY = (cy - p.y) / dist;
+    // 넘어간 만큼 안쪽으로 밀어 넣는다
+    chairX = chairX - outX * (dist - limit);
+    chairY = chairY - outY * (dist - limit);
+    // 바깥으로 가던 속도는 없애고 조금 안쪽으로 튕긴다 (내적: 속도 중 바깥 방향 몫)
+    const outSpeed = chairVX * outX + chairVY * outY;
+    if (outSpeed > 0) {
+      chairVX = chairVX - outX * outSpeed * (1 + WALL_BOUNCE);
+      chairVY = chairVY - outY * outSpeed * (1 + WALL_BOUNCE);
+    }
+    // 가드레일에 긁히는 동안은 느려진다
+    chairVX = chairVX * WALL_FRICTION;
+    chairVY = chairVY * WALL_FRICTION;
   }
-  chairS = trackSamples[chairTrackIndex].s;
-  chairOnBridge = chairOnRoad && trackSamples[chairTrackIndex].bridge;
+}
+
+// ===== 이 위치가 고가도로 가까이(margin 안)에 있는가 =====
+function isNearBridge(x, y, margin) {
+  for (let i = 0; i < trackSamples.length; i += 4) {
+    const q = trackSamples[i];
+    if (q.bridge && Math.abs(q.x - x) < margin && Math.abs(q.y - y) < margin) return true;
+  }
+  return false;
 }
 
 // ===== 이 위치가 의자 근처(화면에 보일 수 있는 범위)인가 =====
@@ -1144,12 +1161,13 @@ function drawRoad(bridgeLevel) {
     ctx.stroke();
     ctx.restore();
 
-    // 난간: 인도보다 조금 넓은 진한 회색 테두리
-    traceTrack(true);
-    ctx.strokeStyle = "#6b6b6b";
-    ctx.lineWidth = (ROAD_HALF + SIDEWALK_WIDTH) * 2 + 16;
-    ctx.stroke();
   }
+
+  // 가드레일: 인도보다 조금 넓은 진한 회색 테두리 (땅 위 길과 고가 모두)
+  traceTrack(bridgeLevel);
+  ctx.strokeStyle = "#6b6b6b";
+  ctx.lineWidth = (ROAD_HALF + SIDEWALK_WIDTH + RAIL_WIDTH) * 2;
+  ctx.stroke();
 
   traceTrack(bridgeLevel);
   ctx.strokeStyle = "#bfbfbf";                    // 인도
@@ -1572,6 +1590,8 @@ function createCones() {
     tries = tries + 1;
     const s = randomBetween(START_LINE_S + 600, TRACK_LENGTH - 400);
     if (pointAt(s).bridge) continue;
+    const pos = trackPosition(s, 0);
+    if (isNearBridge(pos.x, pos.y, (ROAD_HALF + SIDEWALK_WIDTH) * 2)) continue;   // 고가 아래는 가려지니까 피한다
     let nearCrosswalk = false;
     for (let i = 0; i < crosswalks.length; i++) {
       if (Math.abs(crosswalks[i] - s) < 150) nearCrosswalk = true;
@@ -1586,12 +1606,14 @@ function createCrossers() {
   crossers = [];
   for (let i = 0; i < crosswalks.length; i++) {
     for (let k = 0; k < CROSSERS_PER_CROSSWALK; k++) {
+      // 첫 번째는 왼쪽 절반에서 오른쪽으로, 두 번째는 오른쪽 절반에서 왼쪽으로 → 서로 엇갈려 걷는다
+      // 진행 방향으로 ±20씩 떨어져 서서 (학생 몸 두께 36) 엇갈릴 때도 겹치지 않는다
       const speed = randomBetween(0.8, 1.4);
-      crossers.push({
-        s: crosswalks[i] + (k === 0 ? -12 : 12),             // 같은 횡단보도 안에서 살짝 비켜 서기
-        offset: randomBetween(-CROSS_RANGE, CROSS_RANGE),
-        speed: Math.random() < 0.5 ? speed : -speed,
-      });
+      if (k % 2 === 0) {
+        crossers.push({ s: crosswalks[i] - 20, offset: randomBetween(-CROSS_RANGE, 0), speed: speed });
+      } else {
+        crossers.push({ s: crosswalks[i] + 20, offset: randomBetween(0, CROSS_RANGE), speed: -speed });
+      }
     }
   }
 }
