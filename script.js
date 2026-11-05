@@ -120,11 +120,11 @@ const SMOKE_LIFE = 40;        // 연기가 사라지기까지 걸리는 프레�
 
 // ===== 충돌 판정 (6장) =====
 // 판정 영역(히트박스): 그림을 감싸는 사각형을 그림보다 조금 작게 잡는다 (스치기만 해도 부딪히면 억울하니까)
-const CHAIR_HITBOX = 34;      // 의자 판정 사각형 한 변 (그림은 50)
+const CHAIR_HITBOX = 33;      // 의자 판정 사각형 한 변 (그림은 50)
 const CAR_HITBOX_SHRINK = 6;  // 자동차 판정은 그림(40×70)보다 가로·세로 6씩 작게
 const STUDENT_HITBOX = 30;    // 학생 판정 사각형 한 변 (그림은 52×36)
 const CONE_HITBOX = 20;       // 콘 판정 사각형 한 변 (그림은 24)
-let showHitbox = true;        // true면 판정 영역을 빨간 테두리로 그린다 (판정이 맞는지 눈으로 확인용)
+let showHitbox = false;       // true면 판정 영역을 빨간 테두리로 그린다 (판정이 맞는지 눈으로 확인용)
 
 // 부딪혔을 때 효과 (기획서: 학생 = 슬로우, 자동차 = 튕겨 나가고 잠시 스턴). 시간은 전부 프레임 수 (60 ≈ 1초)
 const SLOW_FRAMES = 60;       // 학생·콘에 부딪히면 이만큼 느려진다
@@ -201,7 +201,7 @@ const MINIMAP_X = SCREEN_WIDTH - MINIMAP_SIZE - 12;
 const MINIMAP_Y = 12;
 
 // 남은 시간 글자: 화면 위 가운데
-const TIME_LIMIT = 60;            // 제한 시간(초). 이 안에 강의실에 도착해야 한다
+const TIME_LIMIT = 50;            // 제한 시간(초). 이 안에 강의실에 도착해야 한다
 let startTime = 0;                // 출발한 순간의 시각 (Date.now() 값, 밀리초)
 let remainingMs = TIME_LIMIT * 1000;   // 남은 시간 (밀리초)
 let timeLeft = TIME_LIMIT;        // 화면에 보여 줄 남은 시간 (정수 초)
