@@ -209,8 +209,8 @@ let remainingMs = TIME_LIMIT * 1000;   // 남은 시간 (밀리초)
 let timeLeft = TIME_LIMIT;        // 화면에 보여 줄 남은 시간 (정수 초)
 
 // ===== 게임 상태와 점수 (6장) =====
-// "playing" = 달리는 중 / "finished" = 강의실 도착 (성공) / "gameover" = 시간 초과 (결석)
-let gameState = "playing";
+// "countdown" = 출발 전 3, 2, 1 / "playing" = 달리는 중 / "finished" = 강의실 도착 (성공) / "gameover" = 시간 초과 (결석)
+let gameState = "countdown";
 let score = 0;                    // 점수 = 도착했을 때 남은 시간 × 100 (시간 초과면 0)
 let finishSeconds = 0;            // 도착까지 걸린 시간 (초)
 const FINISH_MARGIN = 60;         // 결승 지점 이만큼 앞에 닿으면 도착으로 친다
@@ -220,7 +220,36 @@ const GAUGE_X = 300;
 const GAUGE_Y = 570;
 const GAUGE_WIDTH = 200;
 const GAUGE_HEIGHT = 14;
-const GAUGE_FILL = 0.4;   // 0 = 비어 있음, 1 = 가득 참
+// ===== 부스터 (기획서: 드리프트하면 게이지가 차고, 다 차면 Ctrl로 부스터) =====
+const DRIFT_GAUGE_RATE = 0.006;  // 최고 속도로 드리프트할 때 한 프레임에 차는 게이지 (0.006 → 약 2.8초면 가득)
+const BOOST_FRAMES = 90;         // 부스터가 이어지는 프레임 수 (90 = 1.5초)
+const BOOST_SPEED_RATE = 1.6;    // 부스터 중 최고 속도 배율
+const BOOST_GRIP = 0.12;         // 부스터 중 속도가 목표를 따라가는 비율 (확 튀어 나가게)
+let boostGauge = 0;              // 부스터 게이지 (0 = 빈칸, 1 = 가득)
+let boostTimer = 0;              // 남은 부스터 프레임
+
+// ===== 번아웃 → 출발 대시 (↑와 ↓를 같이 누르면) =====
+// 같이 누르는 동안 제자리에서 바퀴가 헛돌며 힘이 모이고, ↓만 떼면 모인 힘만큼 앞으로 튀어 나간다
+const BURNOUT_CHARGE_FRAMES = 60;   // 힘이 가득 모이는 데 걸리는 프레임 수 (60 = 1초)
+const BURNOUT_MIN_CHARGE = 0.3;     // 이만큼은 모여야 출발 대시가 나간다
+const LAUNCH_BOOST_FRAMES = 45;     // 힘이 가득일 때 출발 대시가 이어지는 프레임 수
+let burnoutCharge = 0;              // 모인 힘 (0 ~ 1)
+let isBurnout = false;              // 지금 번아웃 중인가 (↑와 ↓를 같이 누르는 중)
+let launchMessageTimer = 0;         // "출발!" 같은 글자를 띄울 남은 프레임
+let launchText = "";                // 띄울 글자 ("출발!", "출발 부스터!", "너무 빨랐어요")
+let boostWasPressed = false;        // 직전 프레임에 Ctrl이 눌려 있었나 (꾹 누르고 있어도 한 번만 쓰게)
+
+// ===== 출발 카운트다운과 출발 부스터 (카트라이더처럼) =====
+// 3 → 2 → 1 → GO! 동안은 움직일 수 없다. GO!가 뜨는 순간에 맞춰 ↑를 "새로" 누르면 출발 부스터
+// 카운트다운 내내 ↑를 꾹 누르고 있으면 너무 빨리 누른 것이라 실패한다
+const COUNTDOWN_MS = 3000;          // 카운트다운 길이 (3초)
+const START_BOOST_EARLY_MS = 300;   // GO! 이만큼 전부터
+const START_BOOST_LATE_MS = 250;    // GO! 이만큼 뒤까지 ↑를 새로 누르면 성공
+const START_BOOST_FRAMES = 60;      // 출발 부스터가 이어지는 프레임 수 (1초)
+let countdownStart = 0;             // 카운트다운을 시작한 시각 (Date.now())
+let goTime = 0;                     // GO!가 뜬 시각
+let upPressTime = 0;                // ↑를 마지막으로 새로 누른 시각 (0 = 아직 안 누름)
+let startBoostChecked = false;      // 출발 부스터 판정을 끝냈나
 
 // ===== 맵 꾸미기: 나무·풀·학생·구름을 길을 피해서 배치한다 (시작할 때 한 번) =====
 placeScenery();
@@ -249,7 +278,7 @@ for (const image of allImages) {
     loadedCount = loadedCount + 1;
     // 마지막 이미지까지 다 불러왔으면 게임 루프에 시동을 건다
     if (loadedCount === allImages.length) {
-      startTime = Date.now();        // 시간 재기 시작
+      startCountdown();              // 3, 2, 1 카운트다운 시작 (GO!부터 시간이 흐른다)
       gameLoop();                    // 첫 시동 (그 뒤로는 루프가 스스로 자기를 부른다)
     }
   };
@@ -268,13 +297,18 @@ grassImage.src = "images/grass.png";
 // 키를 누르는 순간: "눌렸다"고 적어 둔다
 document.addEventListener("keydown", function (e) {
   // 방향키·스페이스바로 페이지가 스크롤되어 게임이 흔들리지 않게, 브라우저 기본 동작을 막는다
-  if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", " "].includes(e.key)) {
+  if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", " ", "Control"].includes(e.key)) {
     e.preventDefault();
+  }
+
+  // ↑를 새로 누른 순간을 기록한다 (출발 부스터 판정용). 꾹 누르고 있을 때 반복해서 들어오는 건 무시
+  if (e.key === "ArrowUp" && !keys["ArrowUp"]) {
+    upPressTime = Date.now();
   }
 
   // R 키: 도착했거나 게임 오버일 때 처음부터 다시 시작
   // 한글 입력 상태면 R 자리 키가 "ㄱ"으로 들어오므로, 키 자리 이름(e.code)도 같이 본다
-  if ((e.key === "r" || e.key === "R" || e.code === "KeyR") && gameState !== "playing") {
+  if ((e.key === "r" || e.key === "R" || e.code === "KeyR") && (gameState === "finished" || gameState === "gameover")) {
     resetGame();
   }
 
@@ -310,8 +344,13 @@ function gameLoop() {
 
   // ===== ② 계산: 상태(숫자)를 바꾼다 =====
 
+  // 카운트다운 중에는 시간만 잰다 (아무것도 움직이지 않는다)
+  if (gameState === "countdown") {
+    updateCountdown();
+  }
   // 달리는 중일 때만 계산한다. 도착했거나 게임 오버면 모두 멈춘다 (루프는 계속 돌면서 결과 화면을 그린다)
   if (gameState === "playing") {
+    checkStartBoost();
     updateGame();
   }
 
@@ -632,18 +671,19 @@ function gameLoop() {
   ctx.fillStyle = "rgba(0, 0, 0, 0.5)";
   ctx.fillRect(GAUGE_X - 10, GAUGE_Y - 26, GAUGE_WIDTH + 20, GAUGE_HEIGHT + 34);
 
-  // 게이지 이름
-  ctx.fillStyle = "#ffffff";
-  ctx.font = "14px sans-serif";
-  ctx.fillText("부스터", 400, GAUGE_Y - 14);
+  // 게이지 이름: 가득 차면 노랗게 "부스터 준비! Ctrl"
+  const gaugeReady = boostGauge >= 1;
+  ctx.fillStyle = gaugeReady ? "#ffd84d" : "#ffffff";
+  ctx.font = gaugeReady ? "bold 14px sans-serif" : "14px sans-serif";
+  ctx.fillText(gaugeReady ? "부스터 준비! Ctrl" : "부스터 (드리프트하면 찬다)", 400, GAUGE_Y - 14);
 
   // 빈 칸: 어두운 막대
   ctx.fillStyle = "#333333";
   ctx.fillRect(GAUGE_X, GAUGE_Y, GAUGE_WIDTH, GAUGE_HEIGHT);
 
-  // 찬 칸: 주황 막대 (가로 길이 = 전체 길이 × 찬 비율)
-  ctx.fillStyle = "#ff9f1c";
-  ctx.fillRect(GAUGE_X, GAUGE_Y, GAUGE_WIDTH * GAUGE_FILL, GAUGE_HEIGHT);
+  // 찬 칸: 주황 막대 (가로 길이 = 전체 길이 × 찬 비율). 가득 차면 노랗게 깜빡인다
+  ctx.fillStyle = gaugeReady && Date.now() % 500 < 250 ? "#ffd84d" : "#ff9f1c";
+  ctx.fillRect(GAUGE_X, GAUGE_Y, GAUGE_WIDTH * boostGauge, GAUGE_HEIGHT);
 
   // 게이지 테두리
   ctx.strokeStyle = "#ffffff";
@@ -657,7 +697,7 @@ function gameLoop() {
   ctx.font = "bold 18px sans-serif";
   ctx.textAlign = "left";
   ctx.textBaseline = "middle";
-  if (gameState === "playing") {
+  if (gameState === "playing" || gameState === "countdown") {
     ctx.fillText("점수: " + Math.floor(remainingMs / 10), 20, 28);
   } else {
     ctx.fillText("점수: " + score, 20, 28);
@@ -677,6 +717,61 @@ function gameLoop() {
     ]);
   }
 
+  // ----- 16. 번아웃 중: 모인 힘 막대 (게이지 위) -----
+  if (isBurnout) {
+    ctx.fillStyle = "rgba(0, 0, 0, 0.55)";
+    ctx.fillRect(290, 488, 220, 42);
+    ctx.fillStyle = "#ffffff";
+    ctx.font = "bold 14px sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText("번아웃! ↓만 떼면 출발", 400, 502);
+    ctx.fillStyle = "#333333";
+    ctx.fillRect(300, 514, 200, 10);
+    ctx.fillStyle = "#ff5c5c";
+    ctx.fillRect(300, 514, 200 * burnoutCharge, 10);
+  }
+
+  // ----- 17. 부스터 글자: "출발 부스터!" 같은 알림이 먼저, 없으면 부스터 중 "BOOST!" -----
+  let bigText = "";
+  if (launchMessageTimer > 0) bigText = launchText;
+  else if (boostTimer > 0) bigText = "BOOST!";
+  if (bigText !== "") {
+    ctx.fillStyle = bigText === "너무 빨랐어요" ? "#cccccc" : "#ff9f1c";
+    ctx.strokeStyle = "#000000";
+    ctx.lineWidth = 6;
+    ctx.font = "bold italic 40px sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.strokeText(bigText, SCREEN_WIDTH / 2, 150);
+    ctx.fillText(bigText, SCREEN_WIDTH / 2, 150);
+  }
+
+  // ----- 18. 카운트다운: 3, 2, 1 → GO! (GO!는 0.7초 동안) -----
+  let countText = "";
+  if (gameState === "countdown") {
+    countText = String(Math.ceil((COUNTDOWN_MS - (Date.now() - countdownStart)) / 1000));
+  } else if (gameState === "playing" && Date.now() - goTime < 700) {
+    countText = "GO!";
+  }
+  if (countText !== "") {
+    ctx.fillStyle = countText === "GO!" ? "#7CFC00" : "#ffffff";
+    ctx.strokeStyle = "#000000";
+    ctx.lineWidth = 8;
+    ctx.font = "bold 110px sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.strokeText(countText, SCREEN_WIDTH / 2, 250);
+    ctx.fillText(countText, SCREEN_WIDTH / 2, 250);
+    if (gameState === "countdown") {
+      ctx.fillStyle = "#ffffff";
+      ctx.lineWidth = 4;
+      ctx.font = "bold 18px sans-serif";
+      ctx.strokeText("GO! 순간에 ↑를 누르면 출발 부스터", SCREEN_WIDTH / 2, 330);
+      ctx.fillText("GO! 순간에 ↑를 누르면 출발 부스터", SCREEN_WIDTH / 2, 330);
+    }
+  }
+
   // ===== ④ 다음 프레임 예약: 다음 그림 때 gameLoop를 또 불러 달라고 부탁한다 =====
   requestAnimationFrame(gameLoop);
 }
@@ -693,6 +788,36 @@ function updateGame() {
     if (keys["ArrowDown"]) throttle = -REVERSE_SPEED_RATE;
     if (keys["ArrowLeft"]) steer = steer - 1;
     if (keys["ArrowRight"]) steer = steer + 1;
+
+    // 번아웃: ↑와 ↓를 같이 누르면 제자리에서 바퀴가 헛돌며 힘을 모은다 (앞뒤로는 안 간다)
+    const wasBurnout = isBurnout;
+    isBurnout = keys["ArrowUp"] && keys["ArrowDown"] && stunTimer === 0;
+    if (isBurnout) {
+      throttle = 0;
+      burnoutCharge = Math.min(1, burnoutCharge + 1 / BURNOUT_CHARGE_FRAMES);
+    } else if (wasBurnout) {
+      // 번아웃이 막 끝났다: ↓만 떼고 ↑는 그대로면 출발 대시, 아니면 모은 힘은 사라진다
+      if (keys["ArrowUp"] && burnoutCharge >= BURNOUT_MIN_CHARGE) {
+        boostTimer = Math.max(boostTimer, Math.round(LAUNCH_BOOST_FRAMES * burnoutCharge));
+        chairVX = Math.sin(chairAngle) * CHAIR_SPEED * burnoutCharge;   // 바로 튀어 나가게 속도를 준다
+        chairVY = -Math.cos(chairAngle) * CHAIR_SPEED * burnoutCharge;
+        launchText = "출발!";
+        launchMessageTimer = 40;
+      }
+      burnoutCharge = 0;
+    }
+
+    // 부스터: 게이지가 가득일 때 Ctrl을 누르면 (꾹 누르고 있어도 한 번만)
+    const boostPressed = keys["Control"] === true;
+    if (boostPressed && !boostWasPressed && boostGauge >= 1 && stunTimer === 0) {
+      boostTimer = BOOST_FRAMES;
+      boostGauge = 0;
+    }
+    boostWasPressed = boostPressed;
+    // 부스터 중에는 ↑를 안 눌러도 앞으로 나간다
+    if (boostTimer > 0 && stunTimer === 0 && !isBurnout) {
+      throttle = 1;
+    }
 
     // 스턴 중에는 키를 눌러도 소용없다. 의자는 빙글 돌면서 튕겨 나가던 방향으로 미끄러진다
     if (stunTimer > 0) {
@@ -718,6 +843,11 @@ function updateGame() {
     if (slowTimer > 0) {
       maxSpeed = maxSpeed * SLOW_SPEED_RATE;
     }
+    // 부스터 중이면 더 빨라지고, 목표 속도를 빨리 따라간다 (드리프트 중이 아닐 때만)
+    if (boostTimer > 0) {
+      maxSpeed = maxSpeed * BOOST_SPEED_RATE;
+      if (!keys["Shift"] && stunTimer === 0) grip = Math.max(grip, BOOST_GRIP);
+    }
 
     // 5) 목표 속도 = 의자가 바라보는 방향 × 최고 속도 × throttle
     //    각도 0이 위쪽이라, 바라보는 방향의 가로 성분은 sin, 세로 성분은 -cos이다
@@ -736,6 +866,11 @@ function updateGame() {
     // 8) 지금 드리프트 중인가: Shift를 누르고 있고, 어느 정도 빠르게 움직이는 중
     const speed = Math.hypot(chairVX, chairVY);               // 지금 속력 (가로·세로 속도로 만든 빗변 길이)
     isDrifting = keys["Shift"] && speed > DRIFT_MIN_SPEED;
+
+    // 드리프트로 미끄러지는 동안 부스터 게이지가 찬다 (빠를수록 빨리)
+    if (isDrifting) {
+      boostGauge = Math.min(1, boostGauge + DRIFT_GAUGE_RATE * Math.min(1, speed / CHAIR_SPEED));
+    }
   }
 
   // 의자가 맵 밖으로 나가지 않게 네 벽에서 막는다 (벽에 닿으면 그 방향 속도는 0)
@@ -783,6 +918,14 @@ function updateGame() {
   hitCooldown = Math.max(0, hitCooldown - 1);
   hitMessageTimer = Math.max(0, hitMessageTimer - 1);
   flashTimer = Math.max(0, flashTimer - 1);
+  boostTimer = Math.max(0, boostTimer - 1);
+  launchMessageTimer = Math.max(0, launchMessageTimer - 1);
+
+  // 번아웃 중에는 뒷바퀴에서 연기가 난다 (세 프레임에 한 번꼴, 힘이 모일수록 조금 더 크게)
+  if (isBurnout && Math.random() < 0.35) {
+    const wheel = getRearWheels()[Math.floor(Math.random() * 2)];
+    smokes.push({ x: wheel.x, y: wheel.y, size: 2 + burnoutCharge * 2, life: SMOKE_LIFE });
+  }
 
   // 역주행 검사: 의자 속도를 트랙 진행 방향으로 나눠 본다 (내적: 양수 = 앞으로, 음수 = 거꾸로)
   const track = trackSamples[chairTrackIndex];
@@ -932,6 +1075,11 @@ function resetGame() {
   smokes = [];
   lastWheels = null;
   wrongWayFrames = 0;
+  boostGauge = 0;
+  boostTimer = 0;
+  burnoutCharge = 0;
+  isBurnout = false;
+  launchMessageTimer = 0;
 
   // 시간과 점수
   startTime = Date.now();
@@ -939,7 +1087,46 @@ function resetGame() {
   timeLeft = TIME_LIMIT;
   score = 0;
   finishSeconds = 0;
-  gameState = "playing";
+  startCountdown();   // 바로 달리지 않고 3, 2, 1 카운트다운부터
+}
+
+// ===== 카운트다운 시작: 3, 2, 1, GO! 가 끝나야 달릴 수 있다 =====
+function startCountdown() {
+  gameState = "countdown";
+  countdownStart = Date.now();
+  upPressTime = 0;
+  startBoostChecked = false;
+}
+
+// ===== 카운트다운 중 매 프레임: 3초가 지나면 GO! (그때부터 제한 시간이 흐른다) =====
+function updateCountdown() {
+  if (Date.now() - countdownStart >= COUNTDOWN_MS) {
+    gameState = "playing";
+    goTime = Date.now();
+    startTime = goTime;
+  }
+}
+
+// ===== 출발 부스터 판정 (GO! 직후 잠깐 동안, 달리는 중 매 프레임) =====
+// ↑를 새로 누른 시각이 GO! 0.3초 전 ~ 0.25초 후 사이면 성공. 판정은 한 판에 한 번만
+function checkStartBoost() {
+  if (startBoostChecked) return;
+  const inWindow = upPressTime >= goTime - START_BOOST_EARLY_MS && upPressTime <= goTime + START_BOOST_LATE_MS;
+  if (upPressTime !== 0 && inWindow) {
+    boostTimer = START_BOOST_FRAMES;
+    chairVX = Math.sin(chairAngle) * CHAIR_SPEED;   // 바로 튀어 나가게 속도를 준다
+    chairVY = -Math.cos(chairAngle) * CHAIR_SPEED;
+    launchText = "출발 부스터!";
+    launchMessageTimer = 60;
+    startBoostChecked = true;
+  } else if (Date.now() > goTime + START_BOOST_LATE_MS) {
+    // 기회가 지나갔다. GO! 전에 미리 눌러서 계속 누르고 있었다면 "너무 빨랐어요"
+    if (upPressTime !== 0 && upPressTime < goTime - START_BOOST_EARLY_MS) {
+      launchText = "너무 빨랐어요";
+      launchMessageTimer = 60;
+    }
+    startBoostChecked = true;
+  }
 }
 
 // ===== 트랙 만들기: TRACK_POINTS를 TRACK_STEP 간격의 점들로 나눈다 (시작할 때 한 번) =====
@@ -1267,7 +1454,27 @@ function drawChair() {
     ctx.globalAlpha = 0.35;
   }
   ctx.translate(chairX + CHAIR_SIZE / 2, chairY + CHAIR_SIZE / 2);   // 의자 중심으로 붓을 옮긴다
-  ctx.rotate(chairAngle);
+  // 번아웃 중에는 부르르 떤다
+  const shake = isBurnout ? (Math.random() - 0.5) * 0.15 : 0;
+  ctx.rotate(chairAngle + shake);
+  // 부스터 불꽃: 의자 뒤(그림의 아래쪽)로 뿜어져 나오는 주황·노랑 삼각형. 길이가 떨려서 타오르는 것처럼 보인다
+  if (boostTimer > 0) {
+    const flame = 22 + Math.random() * 14;
+    ctx.fillStyle = "#ff7a1a";
+    ctx.beginPath();
+    ctx.moveTo(-9, CHAIR_SIZE / 2 - 4);
+    ctx.lineTo(9, CHAIR_SIZE / 2 - 4);
+    ctx.lineTo(0, CHAIR_SIZE / 2 - 4 + flame);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = "#fff2a0";
+    ctx.beginPath();
+    ctx.moveTo(-4, CHAIR_SIZE / 2 - 4);
+    ctx.lineTo(4, CHAIR_SIZE / 2 - 4);
+    ctx.lineTo(0, CHAIR_SIZE / 2 - 4 + flame * 0.55);
+    ctx.closePath();
+    ctx.fill();
+  }
   ctx.drawImage(chairImage, -CHAIR_SIZE / 2, -CHAIR_SIZE / 2, CHAIR_SIZE, CHAIR_SIZE);
   ctx.restore();
 }
