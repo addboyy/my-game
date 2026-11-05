@@ -140,15 +140,28 @@ const STUDENT_WOBBLE = 0.12;  // 걸을 때 몸이 좌우로 흔들리는 각도
 // 자동차: 40×70, 트랙을 따라 자기 차선으로 달린다. 위치는 트랙 거리(s)로 기억한다
 const CAR_WIDTH = 40;
 const CAR_HEIGHT = 70;
-// 자동차 1: 의자와 같은 방향(오른쪽 차선)으로 달린다. 의자보다 조금 느려서 따라잡을 수 있다
-let carS = 1800;
-let carSpeed = 7;         // 한 프레임에 트랙을 따라 7씩 앞으로
-// 자동차 2: 반대 방향 차선으로 마주 온다
-let car2S = 3500;
-let car2Speed = -6;       // 한 프레임에 트랙을 거슬러 6씩 (음수 = 결승 → 출발 방향)
+// 자동차들: 배열 하나에 여러 대를 담는다. 한 대는 { s: 트랙 거리, speed: 속도, lane: 차선 }
+// speed가 양수면 의자와 같은 방향(오른쪽 차선, lane 1), 음수면 마주 오는 차(반대편 차선, lane -1)
+// CAR_COUNT 숫자만 바꾸면 코드를 고치지 않아도 자동차 수가 바뀐다
+const CAR_COUNT = 4;
+let cars = [];
 const CAR_RESPAWN_AHEAD = 2500;   // 자동차가 멀어지면 의자보다 이만큼 앞에 다시 나타난다
 const CAR_RESPAWN_BEHIND = 1500;  // 의자보다 이만큼 뒤로 처지면 다시 나타나게 한다
 const CAR_INSIDE_BUILDING = 150;  // 결승을 지나 이만큼 더 가면 강의실 건물 안에 완전히 가려진다
+
+// 공사 콘: 차도 위에 가만히 놓인 장애물. 한 개는 { s: 트랙 거리, offset: 길 가운데에서 옆으로 떨어진 거리 }
+// offset이 양수면 진행 방향 오른쪽, 음수면 왼쪽
+const CONE_COUNT = 25;
+const CONE_SIZE = 24;
+let cones = [];
+
+// 횡단보도와 길을 건너는 학생: 트랙 곳곳의 직선 구간에 횡단보도를 만들고, 학생이 차도를 가로질러 오간다
+// 건너는 학생 한 명은 { s: 횡단보도 위치, offset: 길 가운데에서 옆으로 떨어진 거리, speed: 건너는 속도 }
+const CROSSWALK_GAP = 3000;                              // 횡단보도 사이 간격 (트랙 거리)
+const CROSSERS_PER_CROSSWALK = 2;                        // 횡단보도 하나에 건너는 학생 수
+const CROSS_RANGE = ROAD_HALF + SIDEWALK_WIDTH / 2;      // 한쪽 인도 가운데 ~ 반대편 인도 가운데
+let crosswalks = [];
+let crossers = [];
 
 // 자동차 전조등: 자동차 앞쪽으로 뻗는 노란 반투명 빛
 const HEADLIGHT_LENGTH = 45;  // 빛이 뻗는 길이
@@ -178,6 +191,12 @@ const GAUGE_FILL = 0.4;   // 0 = 비어 있음, 1 = 가득 참
 
 // ===== 맵 꾸미기: 나무·풀·학생·구름을 길을 피해서 배치한다 (시작할 때 한 번) =====
 placeScenery();
+
+// ===== 장애물 배치: 횡단보도 자리 찾기 → 자동차·콘·건너는 학생 만들기 =====
+crosswalks = findCrosswalks();
+createCars();
+createCones();
+createCrossers();
 
 // ===== 이미지 불러오기 =====
 // 이미지는 불러오는 데 시간이 걸린다.
@@ -369,34 +388,50 @@ function gameLoop() {
   const chairCenterX = chairX + CHAIR_SIZE / 2;
   const chairCenterY = chairY + CHAIR_SIZE / 2;
 
-  // 자동차 1을 트랙을 따라 앞으로 옮긴다. 결승을 지나면 강의실 건물 안으로 들어가 가려진다
-  // 의자보다 한참 뒤로 처지거나 건물 안으로 다 들어가면, 의자보다 앞쪽에 다시 나타난다
-  // 단, 의자가 결승 근처라 앞쪽 자리가 트랙 밖이면, 의자 뒤쪽(화면 밖)에 다시 놓는다
-  carS = carS + carSpeed;
-  if (carS < chairS - CAR_RESPAWN_BEHIND || carS > TRACK_LENGTH + CAR_INSIDE_BUILDING) {
-    if (chairS + CAR_RESPAWN_AHEAD < TRACK_LENGTH) {
-      carS = chairS + CAR_RESPAWN_AHEAD;
+  // 자동차들을 for 반복문으로 한 대씩 트랙을 따라 옮긴다 (몇 대든 이 코드 그대로)
+  for (let i = 0; i < cars.length; i++) {
+    const car = cars[i];
+    car.s = car.s + car.speed;
+    // 다시 나타날 앞쪽 자리: 차들이 한곳에 몰리지 않게 조금씩 다르게
+    const ahead = chairS + CAR_RESPAWN_AHEAD + Math.random() * 1500;
+
+    if (car.speed > 0) {
+      // 같은 방향 차: 결승을 지나면 강의실 건물 안으로 들어가 가려진다
+      // 의자보다 한참 뒤로 처지거나 건물 안으로 다 들어가면, 의자보다 앞쪽에 다시 나타난다
+      // 단, 의자가 결승 근처라 앞쪽 자리가 트랙 밖이면, 의자 뒤쪽(화면 밖)에 다시 놓는다
+      if (car.s < chairS - CAR_RESPAWN_BEHIND || car.s > TRACK_LENGTH + CAR_INSIDE_BUILDING) {
+        if (ahead < TRACK_LENGTH) {
+          car.s = ahead;
+        } else {
+          car.s = chairS - CAR_RESPAWN_BEHIND + 200;
+        }
+      }
     } else {
-      carS = chairS - CAR_RESPAWN_BEHIND + 200;
+      // 마주 오는 차: 의자 뒤로 지나가 버리면, 다시 의자 앞쪽에서 마주 오게 한다
+      // 앞쪽 자리가 트랙 끝을 넘으면 강의실 건물 안에서 출발해서, 건물에서 나오는 것처럼 보이게 한다
+      if (car.s < chairS - CAR_RESPAWN_BEHIND || car.s < 0) {
+        car.s = Math.min(ahead, TRACK_LENGTH + CAR_INSIDE_BUILDING);
+      }
     }
   }
 
   // 흔들림 시계를 조금 앞으로 돌린다 (풀잎 흔들림에 쓴다)
   swayTime = swayTime + SWAY_SPEED;
 
-  // 자동차 2를 트랙을 거슬러 옮긴다 (속도가 음수라 s가 줄어든다)
-  // 의자 뒤로 지나가 버리면, 다시 의자 앞쪽에서 마주 오게 한다
-  // 앞쪽 자리가 트랙 끝을 넘으면 강의실 건물 안에서 출발해서, 건물에서 나오는 것처럼 보이게 한다
-  car2S = car2S + car2Speed;
-  if (car2S < chairS - CAR_RESPAWN_BEHIND || car2S < 0) {
-    car2S = Math.min(chairS + CAR_RESPAWN_AHEAD, TRACK_LENGTH + CAR_INSIDE_BUILDING);
-  }
-
   // 학생들을 인도 위에서 걷는 속도만큼 옮기고, 자기 구간 끝에 닿으면 방향을 뒤집는다
   for (const student of students) {
     student.s = student.s + student.speed;
     if (student.s > student.maxS || student.s < student.minS) {
       student.speed = -student.speed;
+    }
+  }
+
+  // 건너는 학생들: 차도를 가로질러 걷다가 반대편 인도 가운데에 닿으면 돌아선다
+  for (let i = 0; i < crossers.length; i++) {
+    const crosser = crossers[i];
+    crosser.offset = crosser.offset + crosser.speed;
+    if (crosser.offset > CROSS_RANGE || crosser.offset < -CROSS_RANGE) {
+      crosser.speed = -crosser.speed;
     }
   }
 
@@ -479,8 +514,24 @@ function gameLoop() {
     }
   });
 
+  // 트랙 곳곳의 횡단보도 (학생이 건너는 곳)
+  for (let i = 0; i < crosswalks.length; i++) {
+    drawAcrossRoad(crosswalks[i], function () {
+      ctx.fillStyle = "#ffffff";
+      for (let x = -ROAD_HALF + 20; x < ROAD_HALF - 20; x += 40) {
+        ctx.fillRect(x, -20, 20, 40);
+      }
+    });
+  }
+
   // ----- 스키드 마크 (땅 위 자국): 땅바닥에 붙은 자국이라 도로 바로 위, 나머지 모든 것 아래에 -----
   drawSkidMarks(false);
+
+  // ----- 공사 콘 (차도 위): for 반복문으로 전부 그린다 -----
+  for (let i = 0; i < cones.length; i++) {
+    const pos = trackPosition(cones[i].s, cones[i].offset);
+    if (isNearChair(pos.x, pos.y, CONE_SIZE)) drawCone(pos.x, pos.y);
+  }
 
   // ----- 5. 나무 (잔디 위): 풀과 같은 흔들림 시계로 살짝 기울었다 돌아온다 -----
   for (const tree of trees) {
@@ -518,16 +569,40 @@ function gameLoop() {
     ctx.restore();
   }
 
+  // 횡단보도를 건너는 학생들: 길을 가로지르는 방향을 보고 걷는다
+  for (let i = 0; i < crossers.length; i++) {
+    const crosser = crossers[i];
+    const p = pointAt(crosser.s);
+    const pos = trackPosition(crosser.s, crosser.offset);
+    if (!isNearChair(pos.x, pos.y, STUDENT_WIDTH)) continue;
+    // 걷는 방향: 트랙 진행 방향에 수직(옆 방향). speed가 음수면 반대쪽으로
+    let dirX = -p.ty;
+    let dirY = p.tx;
+    if (crosser.speed < 0) {
+      dirX = -dirX;
+      dirY = -dirY;
+    }
+    const facing = Math.atan2(-dirX, dirY);
+    const wobble = Math.sin(crosser.offset * 0.3) * STUDENT_WOBBLE;
+    ctx.save();
+    ctx.translate(pos.x, pos.y);
+    ctx.rotate(facing + wobble);
+    ctx.drawImage(studentImage, -STUDENT_WIDTH / 2, -STUDENT_HEIGHT / 2, STUDENT_WIDTH, STUDENT_HEIGHT);
+    ctx.restore();
+  }
+
   // ----- 7. 땅 위의 자동차와 의자 (고가 아래를 지나는 중이면 고가보다 먼저 그려서 고가에 가려지게) -----
-  drawCar(carS, 1, true, false);     // 오른쪽 차선, 앞으로 가는 차
-  drawCar(car2S, -1, false, false);  // 반대편 차선, 마주 오는 차
+  for (let i = 0; i < cars.length; i++) {
+    drawCar(cars[i].s, cars[i].lane, cars[i].speed > 0, false);
+  }
   if (!chairOnBridge) drawChair();
 
   // ----- 8. 고가도로: 그림자 → 난간 → 도로 순서로, 땅 위 모든 것 위에 -----
   drawRoad(true);
   drawSkidMarks(true);
-  drawCar(carS, 1, true, true);
-  drawCar(car2S, -1, false, true);
+  for (let i = 0; i < cars.length; i++) {
+    drawCar(cars[i].s, cars[i].lane, cars[i].speed > 0, true);
+  }
   if (chairOnBridge) drawChair();
 
   // ----- 9. 바퀴 연기 -----
@@ -1060,11 +1135,6 @@ function placeScenery() {
     }
     return true;
   }
-  // min ~ max 사이의 아무 수
-  function randomBetween(min, max) {
-    return min + Math.random() * (max - min);
-  }
-
   // 나무: 나무 중심이 길에서 나무 크기만큼 떨어진 곳에만
   for (let i = 0; i < TREE_COUNT; i++) {
     const x = randomBetween(WORLD_LEFT, WORLD_RIGHT - TREE_SIZE);
@@ -1107,6 +1177,112 @@ function placeScenery() {
       size: randomBetween(0.7, 1),
     });
   }
+}
+
+// ===== min ~ max 사이의 아무 수 =====
+function randomBetween(min, max) {
+  return min + Math.random() * (max - min);
+}
+
+// ===== 트랙 거리 s 지점에서 길 가운데로부터 옆으로 offset만큼 떨어진 곳의 맵 좌표 =====
+// offset 양수 = 진행 방향 오른쪽, 음수 = 왼쪽 (진행 방향의 오른쪽 옆 = (-ty, tx))
+function trackPosition(s, offset) {
+  const p = pointAt(s);
+  return { x: p.x - p.ty * offset, y: p.y + p.tx * offset };
+}
+
+// ===== 장애물을 놓아도 되는 곧은 땅 위 길인가 =====
+// s 앞뒤 halfLength 안에서 길이 휘지 않고, 고가 위도 아니고, 고가와 가깝지도 않아야 한다
+function isStraightGround(s, halfLength) {
+  const center = pointAt(s);
+  for (const d of [-halfLength, 0, halfLength]) {
+    const p = pointAt(s + d);
+    if (p.bridge) return false;
+    if (p.tx * center.tx + p.ty * center.ty < 0.999) return false;   // 방향이 달라졌으면 휘는 곳
+  }
+  // 고가도로 바로 아래(또는 옆)도 피한다 (고가에 가려서 안 보이니까)
+  for (let i = 0; i < trackSamples.length; i += 4) {
+    const q = trackSamples[i];
+    if (q.bridge && Math.hypot(q.x - center.x, q.y - center.y) < (ROAD_HALF + SIDEWALK_WIDTH) * 2 + 100) return false;
+  }
+  return true;
+}
+
+// ===== 횡단보도 자리 찾기 (시작할 때 한 번) =====
+// CROSSWALK_GAP마다, 곧은 땅 위 길이 나올 때까지 조금씩 앞으로 가며 찾는다
+function findCrosswalks() {
+  const list = [];
+  let s = START_LINE_S + 1400;
+  while (s < TRACK_LENGTH - 700) {
+    if (isStraightGround(s, 150)) {
+      list.push(s);
+      s = s + CROSSWALK_GAP;
+    } else {
+      s = s + 50;
+    }
+  }
+  return list;
+}
+
+// ===== 자동차 만들기 =====
+// 짝수 번째는 같은 방향 차, 홀수 번째는 마주 오는 차. 처음 위치와 속도는 조금씩 다르게
+function createCars() {
+  cars = [];
+  for (let i = 0; i < CAR_COUNT; i++) {
+    if (i % 2 === 0) {
+      cars.push({ s: START_LINE_S + 1500 + i * 900, speed: randomBetween(5.5, 7), lane: 1 });
+    } else {
+      cars.push({ s: START_LINE_S + 2500 + i * 900, speed: -randomBetween(5, 6.5), lane: -1 });
+    }
+  }
+}
+
+// ===== 공사 콘 만들기 =====
+// 출발선 뒤쪽 ~ 결승 앞 사이의 땅 위 차도에 아무렇게나 놓는다. 횡단보도 근처와 고가는 피한다
+function createCones() {
+  cones = [];
+  let tries = 0;
+  while (cones.length < CONE_COUNT && tries < 1000) {
+    tries = tries + 1;
+    const s = randomBetween(START_LINE_S + 600, TRACK_LENGTH - 400);
+    if (pointAt(s).bridge) continue;
+    let nearCrosswalk = false;
+    for (let i = 0; i < crosswalks.length; i++) {
+      if (Math.abs(crosswalks[i] - s) < 150) nearCrosswalk = true;
+    }
+    if (nearCrosswalk) continue;
+    cones.push({ s: s, offset: randomBetween(-(ROAD_HALF - 20), ROAD_HALF - 20) });
+  }
+}
+
+// ===== 건너는 학생 만들기: 횡단보도마다 몇 명씩, 서로 다른 자리와 속도로 =====
+function createCrossers() {
+  crossers = [];
+  for (let i = 0; i < crosswalks.length; i++) {
+    for (let k = 0; k < CROSSERS_PER_CROSSWALK; k++) {
+      const speed = randomBetween(0.8, 1.4);
+      crossers.push({
+        s: crosswalks[i] + (k === 0 ? -12 : 12),             // 같은 횡단보도 안에서 살짝 비켜 서기
+        offset: randomBetween(-CROSS_RANGE, CROSS_RANGE),
+        speed: Math.random() < 0.5 ? speed : -speed,
+      });
+    }
+  }
+}
+
+// ===== 공사 콘 그리기 (위에서 본 모양): 사각 받침 + 주황 원뿔 + 흰 띠 =====
+function drawCone(x, y) {
+  ctx.fillStyle = "#b34700";                                   // 받침
+  ctx.fillRect(x - CONE_SIZE / 2, y - CONE_SIZE / 2, CONE_SIZE, CONE_SIZE);
+  ctx.fillStyle = "#ff7a00";                                   // 원뿔
+  ctx.beginPath();
+  ctx.arc(x, y, CONE_SIZE * 0.4, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = "#ffffff";                                 // 반사 띠
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.arc(x, y, CONE_SIZE * 0.22, 0, Math.PI * 2);
+  ctx.stroke();
 }
 
 // ===== 각도 차이 계산 =====
