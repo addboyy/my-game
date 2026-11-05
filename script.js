@@ -201,8 +201,17 @@ const MINIMAP_X = SCREEN_WIDTH - MINIMAP_SIZE - 12;
 const MINIMAP_Y = 12;
 
 // 남은 시간 글자: 화면 위 가운데
-let timeLeft = 90;        // 남은 시간(초). 1초마다 1씩 줄어든다
-let lastSecondTime = 0;   // 마지막으로 1초를 줄인 시각 (Date.now() 값, 밀리초)
+const TIME_LIMIT = 60;            // 제한 시간(초). 이 안에 강의실에 도착해야 한다
+let startTime = 0;                // 출발한 순간의 시각 (Date.now() 값, 밀리초)
+let remainingMs = TIME_LIMIT * 1000;   // 남은 시간 (밀리초)
+let timeLeft = TIME_LIMIT;        // 화면에 보여 줄 남은 시간 (정수 초)
+
+// ===== 게임 상태와 점수 (6장) =====
+// "playing" = 달리는 중 / "finished" = 강의실 도착 (성공) / "gameover" = 시간 초과 (결석)
+let gameState = "playing";
+let score = 0;                    // 점수 = 도착했을 때 남은 시간 × 100 (시간 초과면 0)
+let finishSeconds = 0;            // 도착까지 걸린 시간 (초)
+const FINISH_MARGIN = 60;         // 결승 지점 이만큼 앞에 닿으면 도착으로 친다
 
 // 부스터 게이지: 화면 아래 가운데
 const GAUGE_X = 300;
@@ -238,7 +247,7 @@ for (const image of allImages) {
     loadedCount = loadedCount + 1;
     // 마지막 이미지까지 다 불러왔으면 게임 루프에 시동을 건다
     if (loadedCount === allImages.length) {
-      lastSecondTime = Date.now();   // 시간 재기 시작
+      startTime = Date.now();        // 시간 재기 시작
       gameLoop();                    // 첫 시동 (그 뒤로는 루프가 스스로 자기를 부른다)
     }
   };
@@ -259,6 +268,12 @@ document.addEventListener("keydown", function (e) {
   // 방향키·스페이스바로 페이지가 스크롤되어 게임이 흔들리지 않게, 브라우저 기본 동작을 막는다
   if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", " "].includes(e.key)) {
     e.preventDefault();
+  }
+
+  // R 키: 도착했거나 게임 오버일 때 처음부터 다시 시작
+  // 한글 입력 상태면 R 자리 키가 "ㄱ"으로 들어오므로, 키 자리 이름(e.code)도 같이 본다
+  if ((e.key === "r" || e.key === "R" || e.code === "KeyR") && gameState !== "playing") {
+    resetGame();
   }
 
   if (CONTROL_METHOD === "A") {
@@ -293,220 +308,14 @@ function gameLoop() {
 
   // ===== ② 계산: 상태(숫자)를 바꾼다 =====
 
-  // 의자 조작 (방식 B): 지금 눌려 있는 키를 보고 움직인다
-  if (CONTROL_METHOD === "B") {
-    // 1) 눌린 방향키 읽기: ↑↓는 앞뒤(throttle), ←→는 핸들(steer)
-    //    두 키를 같이 누르면 두 줄이 다 실행되므로, 앞으로 가면서 꺾을 수 있다
-    let throttle = 0;   // 1 = 앞으로, -REVERSE_SPEED_RATE = 뒤로, 0 = 안 누름
-    let steer = 0;      // -1 = 왼쪽으로 꺾기, 1 = 오른쪽으로 꺾기
-    if (keys["ArrowUp"]) throttle = 1;
-    if (keys["ArrowDown"]) throttle = -REVERSE_SPEED_RATE;
-    if (keys["ArrowLeft"]) steer = steer - 1;
-    if (keys["ArrowRight"]) steer = steer + 1;
-
-    // 스턴 중에는 키를 눌러도 소용없다. 의자는 빙글 돌면서 튕겨 나가던 방향으로 미끄러진다
-    if (stunTimer > 0) {
-      throttle = 0;
-      steer = 0;
-      chairAngle = chairAngle + STUN_SPIN;
-    }
-
-    // 2) Shift를 누르고 있으면 드리프트: 접지력이 약해져서 미끄러지고, 핸들은 더 잘 돈다
-    let grip = GRIP;
-    let turnRate = TURN_RATE;
-    if (keys["Shift"] || stunTimer > 0) {
-      grip = DRIFT_GRIP;            // 스턴 중에도 접지력이 약해서 튕긴 힘이 오래 간다
-      turnRate = DRIFT_TURN_RATE;
-    }
-
-    // 3) 핸들: 의자가 바라보는 방향을 돌린다 (바퀴 달린 의자라 제자리에서도 돈다)
-    chairAngle = chairAngle + steer * turnRate;
-
-    // 4) 길(차도·인도)을 벗어나 잔디 위에 있으면 최고 속도가 줄어든다
-    let maxSpeed = CHAIR_SPEED;
-    if (!chairOnRoad) {
-      maxSpeed = CHAIR_SPEED * GRASS_SPEED_RATE;
-    }
-    // 학생·콘에 부딪혀 슬로우 중이면 더 느려진다
-    if (slowTimer > 0) {
-      maxSpeed = maxSpeed * SLOW_SPEED_RATE;
-    }
-
-    // 5) 목표 속도 = 의자가 바라보는 방향 × 최고 속도 × throttle
-    //    각도 0이 위쪽이라, 바라보는 방향의 가로 성분은 sin, 세로 성분은 -cos이다
-    const targetVX = Math.sin(chairAngle) * maxSpeed * throttle;
-    const targetVY = -Math.cos(chairAngle) * maxSpeed * throttle;
-
-    // 6) 지금 속도가 목표 속도를 grip 비율만큼만 따라간다
-    //    grip이 크면 바라보는 쪽으로 바로 가고, 작으면 원래 가던 쪽으로 계속 미끄러진다 (관성 = 드리프트)
-    chairVX = chairVX + (targetVX - chairVX) * grip;
-    chairVY = chairVY + (targetVY - chairVY) * grip;
-
-    // 7) 속도만큼 위치를 옮긴다
-    chairX = chairX + chairVX;
-    chairY = chairY + chairVY;
-
-    // 8) 지금 드리프트 중인가: Shift를 누르고 있고, 어느 정도 빠르게 움직이는 중
-    const speed = Math.hypot(chairVX, chairVY);               // 지금 속력 (가로·세로 속도로 만든 빗변 길이)
-    isDrifting = keys["Shift"] && speed > DRIFT_MIN_SPEED;
-  }
-
-  // 의자가 맵 밖으로 나가지 않게 네 벽에서 막는다 (벽에 닿으면 그 방향 속도는 0)
-  // 오른쪽·아래쪽은 의자 크기를 뺀다 (chairX는 왼쪽 위 꼭짓점이라, 빼지 않으면 반쯤 박힌다)
-  // 위쪽 벽은 강의실 건물 아래 끝이다 (건물 안으로는 못 들어간다)
-  if (chairX < WORLD_LEFT) {
-    chairX = WORLD_LEFT;
-    chairVX = 0;
-  }
-  if (chairX > WORLD_RIGHT - CHAIR_SIZE) {
-    chairX = WORLD_RIGHT - CHAIR_SIZE;
-    chairVX = 0;
-  }
-  if (chairY < WORLD_TOP) {
-    chairY = WORLD_TOP;
-    chairVY = 0;
-  }
-  if (chairY > WORLD_BOTTOM - CHAIR_SIZE) {
-    chairY = WORLD_BOTTOM - CHAIR_SIZE;
-    chairVY = 0;
-  }
-
-  // 의자가 트랙의 어디쯤인지, 길 위인지, 고가 위인지 알아낸다
-  updateChairTrack();
-
-  // 충돌 검사: 의자 판정 사각형과 장애물 판정 사각형을 하나씩 비교한다
-  // 같은 층(땅 위 / 고가 위)에 있는 것끼리만 부딪힌다. 고가 아래를 지나는 차와는 안 부딪힌다
-  // 무적 시간(hitCooldown) 중에는 검사하지 않는다
-  if (hitCooldown === 0) {
-    const chairBox = getChairHitbox();
-    const obstacleBoxes = getObstacleHitboxes();
-    for (let i = 0; i < obstacleBoxes.length; i++) {
-      const box = obstacleBoxes[i];
-      if (box.bridge !== chairOnBridge) continue;
-      if (checkCollision(chairBox, box)) {
-        hitObstacle(box);
-        break;   // 한 프레임에 하나만 처리한다 (부딪힌 뒤엔 무적이니까)
-      }
-    }
-  }
-
-  // 효과 타이머들을 1프레임씩 줄인다 (0 아래로는 안 내려간다)
-  slowTimer = Math.max(0, slowTimer - 1);
-  stunTimer = Math.max(0, stunTimer - 1);
-  hitCooldown = Math.max(0, hitCooldown - 1);
-  hitMessageTimer = Math.max(0, hitMessageTimer - 1);
-  flashTimer = Math.max(0, flashTimer - 1);
-
-  // 역주행 검사: 의자 속도를 트랙 진행 방향으로 나눠 본다 (내적: 양수 = 앞으로, 음수 = 거꾸로)
-  const track = trackSamples[chairTrackIndex];
-  const forwardSpeed = chairVX * track.tx + chairVY * track.ty;
-  if (forwardSpeed < -WRONG_WAY_SPEED) {
-    wrongWayFrames = wrongWayFrames + 1;
-  } else {
-    wrongWayFrames = 0;
-  }
-
-  // 드리프트 연출: 뒷바퀴 자리에 스키드 마크와 연기를 남긴다
-  if (isDrifting) {
-    const wheels = getRearWheels();
-    if (lastWheels !== null) {
-      // 직전 바퀴 위치 → 지금 바퀴 위치를 잇는 짧은 선을 바퀴마다 하나씩 남긴다 (고가 위 자국인지도 기억)
-      for (let i = 0; i < 2; i++) {
-        skidMarks.push({ x1: lastWheels[i].x, y1: lastWheels[i].y, x2: wheels[i].x, y2: wheels[i].y, life: SKID_LIFE, bridge: chairOnBridge });
-      }
-    }
-    lastWheels = wheels;
-
-    // 두 프레임에 한 번꼴로 바퀴 한쪽에서 연기를 피운다
-    if (Math.random() < 0.5) {
-      const wheel = wheels[Math.floor(Math.random() * 2)];
-      smokes.push({ x: wheel.x, y: wheel.y, size: 6, life: SMOKE_LIFE });
-    }
-  } else {
-    lastWheels = null;   // 드리프트가 끊기면 다음 자국은 새로 시작한다 (멀리 떨어진 곳끼리 잇지 않게)
-  }
-
-  // 자국과 연기의 수명을 줄이고, 다 된 것은 지운다
-  // 지우면 뒤 칸이 앞으로 당겨지므로, 뒤에서부터 앞으로 거꾸로 돌아야 하나도 건너뛰지 않는다
-  for (let i = skidMarks.length - 1; i >= 0; i--) {
-    skidMarks[i].life = skidMarks[i].life - 1;
-    if (skidMarks[i].life <= 0) skidMarks.splice(i, 1);
-  }
-  for (let i = smokes.length - 1; i >= 0; i--) {
-    smokes[i].life = smokes[i].life - 1;
-    smokes[i].size = smokes[i].size + 0.5;   // 연기는 퍼지면서 커진다
-    if (smokes[i].life <= 0) smokes.splice(i, 1);
-  }
-
-  // 카메라가 의자 뒤에서 의자가 바라보는 방향으로 천천히 따라 돈다
-  // 한 번에 다 돌지 않고 차이의 일부만 돌아서, 드리프트할 때 화면이 덜덜 떨리지 않고 부드럽게 돈다
-  cameraAngle = cameraAngle + angleDiff(chairAngle, cameraAngle) * CAMERA_TURN_FOLLOW;
-  const chairCenterX = chairX + CHAIR_SIZE / 2;
-  const chairCenterY = chairY + CHAIR_SIZE / 2;
-
-  // 자동차들을 for 반복문으로 한 대씩 트랙을 따라 옮긴다 (몇 대든 이 코드 그대로)
-  for (let i = 0; i < cars.length; i++) {
-    const car = cars[i];
-    car.s = car.s + car.speed;
-    // 다시 나타날 앞쪽 자리: 차들이 한곳에 몰리지 않게 조금씩 다르게
-    const ahead = chairS + CAR_RESPAWN_AHEAD + Math.random() * 1500;
-
-    if (car.speed > 0) {
-      // 같은 방향 차: 결승을 지나면 강의실 건물 안으로 들어가 가려진다
-      // 의자보다 한참 뒤로 처지거나 건물 안으로 다 들어가면, 의자보다 앞쪽에 다시 나타난다
-      // 단, 의자가 결승 근처라 앞쪽 자리가 트랙 밖이면, 의자 뒤쪽(화면 밖)에 다시 놓는다
-      if (car.s < chairS - CAR_RESPAWN_BEHIND || car.s > TRACK_LENGTH + CAR_INSIDE_BUILDING) {
-        if (ahead < TRACK_LENGTH) {
-          car.s = ahead;
-        } else {
-          car.s = chairS - CAR_RESPAWN_BEHIND + 200;
-        }
-      }
-    } else {
-      // 마주 오는 차: 의자 뒤로 지나가 버리면, 다시 의자 앞쪽에서 마주 오게 한다
-      // 앞쪽 자리가 트랙 끝을 넘으면 강의실 건물 안에서 출발해서, 건물에서 나오는 것처럼 보이게 한다
-      if (car.s < chairS - CAR_RESPAWN_BEHIND || car.s < 0) {
-        car.s = Math.min(ahead, TRACK_LENGTH + CAR_INSIDE_BUILDING);
-      }
-    }
-  }
-
-  // 흔들림 시계를 조금 앞으로 돌린다 (풀잎 흔들림에 쓴다)
-  swayTime = swayTime + SWAY_SPEED;
-
-  // 학생들을 인도 위에서 걷는 속도만큼 옮기고, 자기 구간 끝에 닿으면 방향을 뒤집는다
-  for (const student of students) {
-    student.s = student.s + student.speed;
-    if (student.s > student.maxS || student.s < student.minS) {
-      student.speed = -student.speed;
-    }
-  }
-
-  // 건너는 학생들: 차도를 가로질러 걷다가 반대편 인도 가운데에 닿으면 돌아선다
-  for (let i = 0; i < crossers.length; i++) {
-    const crosser = crossers[i];
-    crosser.offset = crosser.offset + crosser.speed;
-    if (crosser.offset > CROSS_RANGE || crosser.offset < -CROSS_RANGE) {
-      crosser.speed = -crosser.speed;
-    }
-  }
-
-  // 구름 그림자를 오른쪽으로 천천히 옮기고, 맵 오른쪽 끝 밖으로 나가면 왼쪽 끝 밖에서 다시 들어온다
-  for (const cloud of clouds) {
-    cloud.x = cloud.x + cloud.speedX;
-    if (cloud.x - CLOUD_RADIUS * cloud.size > WORLD_RIGHT) {
-      cloud.x = WORLD_LEFT - CLOUD_RADIUS * cloud.size;
-    }
-  }
-
-  // 1초(1000밀리초)가 지났으면 남은 시간을 1 줄인다 (0에서 멈춘다)
-  // 프레임 수를 세지 않고 실제 시계로 재므로, 화면이 빠른 기기에서도 똑같이 1초다
-  if (Date.now() - lastSecondTime >= 1000 && timeLeft > 0) {
-    timeLeft = timeLeft - 1;
-    lastSecondTime = lastSecondTime + 1000;
+  // 달리는 중일 때만 계산한다. 도착했거나 게임 오버면 모두 멈춘다 (루프는 계속 돌면서 결과 화면을 그린다)
+  if (gameState === "playing") {
+    updateGame();
   }
 
   // ===== ③ 그리기: 바뀐 숫자대로 화면을 그린다 =====
+  const chairCenterX = chairX + CHAIR_SIZE / 2;
+  const chairCenterY = chairY + CHAIR_SIZE / 2;
 
   // 카메라 (추격 시점): 네 단계로 붓을 옮긴다. 아래에서부터 거꾸로 읽으면 이해하기 쉽다
   //   ④ 의자 중심이 (0, 0)에 오게 맵을 민다
@@ -800,7 +609,7 @@ function gameLoop() {
     ctx.fillStyle = "#ff4d4d";
     if (timeLeft > 0) {
       // 마지막으로 1초가 줄어든 뒤 지난 비율 (0 → 1). 막 줄었을 때 가장 크다
-      const passed = (Date.now() - lastSecondTime) / 1000;
+      const passed = 1 - (remainingMs % 1000) / 1000;
       timeFontSize = 24 + 6 * (1 - Math.min(passed, 1));
     }
   } else {
@@ -834,8 +643,300 @@ function gameLoop() {
   ctx.lineWidth = 1;
   ctx.strokeRect(GAUGE_X, GAUGE_Y, GAUGE_WIDTH, GAUGE_HEIGHT);
 
+  // ----- 14. 점수 (화면 왼쪽 위): 지금 도착하면 받을 점수 = 남은 시간 × 100 -----
+  ctx.fillStyle = "rgba(0, 0, 0, 0.5)";
+  ctx.fillRect(10, 10, 170, 36);
+  ctx.fillStyle = "#ffffff";
+  ctx.font = "bold 18px sans-serif";
+  ctx.textAlign = "left";
+  ctx.textBaseline = "middle";
+  if (gameState === "playing") {
+    ctx.fillText("점수: " + Math.floor(remainingMs / 10), 20, 28);
+  } else {
+    ctx.fillText("점수: " + score, 20, 28);
+  }
+
+  // ----- 15. 결과 화면: 도착(성공) 또는 게임 오버(시간 초과) -----
+  if (gameState === "finished") {
+    drawResultScreen("강의실 도착!", "#ffd84d", [
+      "점수: " + score,
+      "기록: " + finishSeconds.toFixed(2) + "초",
+    ]);
+  } else if (gameState === "gameover") {
+    drawResultScreen("GAME OVER", "#ff4d4d", [
+      "지각! 결석 처리되었어요",
+      "최종 점수: " + score,
+      "강의실까지 " + Math.floor(chairS / TRACK_LENGTH * 100) + "% 왔어요",
+    ]);
+  }
+
   // ===== ④ 다음 프레임 예약: 다음 그림 때 gameLoop를 또 불러 달라고 부탁한다 =====
   requestAnimationFrame(gameLoop);
+}
+
+// ===== 계산: 한 프레임만큼 게임 상태(숫자)를 바꾼다 (gameState가 "playing"일 때만 불린다) =====
+function updateGame() {
+  // 의자 조작 (방식 B): 지금 눌려 있는 키를 보고 움직인다
+  if (CONTROL_METHOD === "B") {
+    // 1) 눌린 방향키 읽기: ↑↓는 앞뒤(throttle), ←→는 핸들(steer)
+    //    두 키를 같이 누르면 두 줄이 다 실행되므로, 앞으로 가면서 꺾을 수 있다
+    let throttle = 0;   // 1 = 앞으로, -REVERSE_SPEED_RATE = 뒤로, 0 = 안 누름
+    let steer = 0;      // -1 = 왼쪽으로 꺾기, 1 = 오른쪽으로 꺾기
+    if (keys["ArrowUp"]) throttle = 1;
+    if (keys["ArrowDown"]) throttle = -REVERSE_SPEED_RATE;
+    if (keys["ArrowLeft"]) steer = steer - 1;
+    if (keys["ArrowRight"]) steer = steer + 1;
+
+    // 스턴 중에는 키를 눌러도 소용없다. 의자는 빙글 돌면서 튕겨 나가던 방향으로 미끄러진다
+    if (stunTimer > 0) {
+      throttle = 0;
+      steer = 0;
+      chairAngle = chairAngle + STUN_SPIN;
+    }
+
+    // 2) Shift를 누르고 있으면 드리프트: 접지력이 약해져서 미끄러지고, 핸들은 더 잘 돈다
+    let grip = GRIP;
+    let turnRate = TURN_RATE;
+    if (keys["Shift"] || stunTimer > 0) {
+      grip = DRIFT_GRIP;            // 스턴 중에도 접지력이 약해서 튕긴 힘이 오래 간다
+      turnRate = DRIFT_TURN_RATE;
+    }
+
+    // 3) 핸들: 의자가 바라보는 방향을 돌린다 (바퀴 달린 의자라 제자리에서도 돈다)
+    chairAngle = chairAngle + steer * turnRate;
+
+    // 4) 길(차도·인도)을 벗어나 잔디 위에 있으면 최고 속도가 줄어든다
+    let maxSpeed = CHAIR_SPEED;
+    if (!chairOnRoad) {
+      maxSpeed = CHAIR_SPEED * GRASS_SPEED_RATE;
+    }
+    // 학생·콘에 부딪혀 슬로우 중이면 더 느려진다
+    if (slowTimer > 0) {
+      maxSpeed = maxSpeed * SLOW_SPEED_RATE;
+    }
+
+    // 5) 목표 속도 = 의자가 바라보는 방향 × 최고 속도 × throttle
+    //    각도 0이 위쪽이라, 바라보는 방향의 가로 성분은 sin, 세로 성분은 -cos이다
+    const targetVX = Math.sin(chairAngle) * maxSpeed * throttle;
+    const targetVY = -Math.cos(chairAngle) * maxSpeed * throttle;
+
+    // 6) 지금 속도가 목표 속도를 grip 비율만큼만 따라간다
+    //    grip이 크면 바라보는 쪽으로 바로 가고, 작으면 원래 가던 쪽으로 계속 미끄러진다 (관성 = 드리프트)
+    chairVX = chairVX + (targetVX - chairVX) * grip;
+    chairVY = chairVY + (targetVY - chairVY) * grip;
+
+    // 7) 속도만큼 위치를 옮긴다
+    chairX = chairX + chairVX;
+    chairY = chairY + chairVY;
+
+    // 8) 지금 드리프트 중인가: Shift를 누르고 있고, 어느 정도 빠르게 움직이는 중
+    const speed = Math.hypot(chairVX, chairVY);               // 지금 속력 (가로·세로 속도로 만든 빗변 길이)
+    isDrifting = keys["Shift"] && speed > DRIFT_MIN_SPEED;
+  }
+
+  // 의자가 맵 밖으로 나가지 않게 네 벽에서 막는다 (벽에 닿으면 그 방향 속도는 0)
+  // 오른쪽·아래쪽은 의자 크기를 뺀다 (chairX는 왼쪽 위 꼭짓점이라, 빼지 않으면 반쯤 박힌다)
+  // 위쪽 벽은 강의실 건물 아래 끝이다 (건물 안으로는 못 들어간다)
+  if (chairX < WORLD_LEFT) {
+    chairX = WORLD_LEFT;
+    chairVX = 0;
+  }
+  if (chairX > WORLD_RIGHT - CHAIR_SIZE) {
+    chairX = WORLD_RIGHT - CHAIR_SIZE;
+    chairVX = 0;
+  }
+  if (chairY < WORLD_TOP) {
+    chairY = WORLD_TOP;
+    chairVY = 0;
+  }
+  if (chairY > WORLD_BOTTOM - CHAIR_SIZE) {
+    chairY = WORLD_BOTTOM - CHAIR_SIZE;
+    chairVY = 0;
+  }
+
+  // 의자가 트랙의 어디쯤인지, 길 위인지, 고가 위인지 알아낸다
+  updateChairTrack();
+
+  // 충돌 검사: 의자 판정 사각형과 장애물 판정 사각형을 하나씩 비교한다
+  // 같은 층(땅 위 / 고가 위)에 있는 것끼리만 부딪힌다. 고가 아래를 지나는 차와는 안 부딪힌다
+  // 무적 시간(hitCooldown) 중에는 검사하지 않는다
+  if (hitCooldown === 0) {
+    const chairBox = getChairHitbox();
+    const obstacleBoxes = getObstacleHitboxes();
+    for (let i = 0; i < obstacleBoxes.length; i++) {
+      const box = obstacleBoxes[i];
+      if (box.bridge !== chairOnBridge) continue;
+      if (checkCollision(chairBox, box)) {
+        hitObstacle(box);
+        break;   // 한 프레임에 하나만 처리한다 (부딪힌 뒤엔 무적이니까)
+      }
+    }
+  }
+
+  // 효과 타이머들을 1프레임씩 줄인다 (0 아래로는 안 내려간다)
+  slowTimer = Math.max(0, slowTimer - 1);
+  stunTimer = Math.max(0, stunTimer - 1);
+  hitCooldown = Math.max(0, hitCooldown - 1);
+  hitMessageTimer = Math.max(0, hitMessageTimer - 1);
+  flashTimer = Math.max(0, flashTimer - 1);
+
+  // 역주행 검사: 의자 속도를 트랙 진행 방향으로 나눠 본다 (내적: 양수 = 앞으로, 음수 = 거꾸로)
+  const track = trackSamples[chairTrackIndex];
+  const forwardSpeed = chairVX * track.tx + chairVY * track.ty;
+  if (forwardSpeed < -WRONG_WAY_SPEED) {
+    wrongWayFrames = wrongWayFrames + 1;
+  } else {
+    wrongWayFrames = 0;
+  }
+
+  // 드리프트 연출: 뒷바퀴 자리에 스키드 마크와 연기를 남긴다
+  if (isDrifting) {
+    const wheels = getRearWheels();
+    if (lastWheels !== null) {
+      // 직전 바퀴 위치 → 지금 바퀴 위치를 잇는 짧은 선을 바퀴마다 하나씩 남긴다 (고가 위 자국인지도 기억)
+      for (let i = 0; i < 2; i++) {
+        skidMarks.push({ x1: lastWheels[i].x, y1: lastWheels[i].y, x2: wheels[i].x, y2: wheels[i].y, life: SKID_LIFE, bridge: chairOnBridge });
+      }
+    }
+    lastWheels = wheels;
+
+    // 두 프레임에 한 번꼴로 바퀴 한쪽에서 연기를 피운다
+    if (Math.random() < 0.5) {
+      const wheel = wheels[Math.floor(Math.random() * 2)];
+      smokes.push({ x: wheel.x, y: wheel.y, size: 6, life: SMOKE_LIFE });
+    }
+  } else {
+    lastWheels = null;   // 드리프트가 끊기면 다음 자국은 새로 시작한다 (멀리 떨어진 곳끼리 잇지 않게)
+  }
+
+  // 자국과 연기의 수명을 줄이고, 다 된 것은 지운다
+  // 지우면 뒤 칸이 앞으로 당겨지므로, 뒤에서부터 앞으로 거꾸로 돌아야 하나도 건너뛰지 않는다
+  for (let i = skidMarks.length - 1; i >= 0; i--) {
+    skidMarks[i].life = skidMarks[i].life - 1;
+    if (skidMarks[i].life <= 0) skidMarks.splice(i, 1);
+  }
+  for (let i = smokes.length - 1; i >= 0; i--) {
+    smokes[i].life = smokes[i].life - 1;
+    smokes[i].size = smokes[i].size + 0.5;   // 연기는 퍼지면서 커진다
+    if (smokes[i].life <= 0) smokes.splice(i, 1);
+  }
+
+  // 카메라가 의자 뒤에서 의자가 바라보는 방향으로 천천히 따라 돈다
+  // 한 번에 다 돌지 않고 차이의 일부만 돌아서, 드리프트할 때 화면이 덜덜 떨리지 않고 부드럽게 돈다
+  cameraAngle = cameraAngle + angleDiff(chairAngle, cameraAngle) * CAMERA_TURN_FOLLOW;
+
+  // 자동차들을 for 반복문으로 한 대씩 트랙을 따라 옮긴다 (몇 대든 이 코드 그대로)
+  for (let i = 0; i < cars.length; i++) {
+    const car = cars[i];
+    car.s = car.s + car.speed;
+    // 다시 나타날 앞쪽 자리: 차들이 한곳에 몰리지 않게 조금씩 다르게
+    const ahead = chairS + CAR_RESPAWN_AHEAD + Math.random() * 1500;
+
+    if (car.speed > 0) {
+      // 같은 방향 차: 결승을 지나면 강의실 건물 안으로 들어가 가려진다
+      // 의자보다 한참 뒤로 처지거나 건물 안으로 다 들어가면, 의자보다 앞쪽에 다시 나타난다
+      // 단, 의자가 결승 근처라 앞쪽 자리가 트랙 밖이면, 의자 뒤쪽(화면 밖)에 다시 놓는다
+      if (car.s < chairS - CAR_RESPAWN_BEHIND || car.s > TRACK_LENGTH + CAR_INSIDE_BUILDING) {
+        if (ahead < TRACK_LENGTH) {
+          car.s = ahead;
+        } else {
+          car.s = chairS - CAR_RESPAWN_BEHIND + 200;
+        }
+      }
+    } else {
+      // 마주 오는 차: 의자 뒤로 지나가 버리면, 다시 의자 앞쪽에서 마주 오게 한다
+      // 앞쪽 자리가 트랙 끝을 넘으면 강의실 건물 안에서 출발해서, 건물에서 나오는 것처럼 보이게 한다
+      if (car.s < chairS - CAR_RESPAWN_BEHIND || car.s < 0) {
+        car.s = Math.min(ahead, TRACK_LENGTH + CAR_INSIDE_BUILDING);
+      }
+    }
+  }
+
+  // 흔들림 시계를 조금 앞으로 돌린다 (풀잎 흔들림에 쓴다)
+  swayTime = swayTime + SWAY_SPEED;
+
+  // 학생들을 인도 위에서 걷는 속도만큼 옮기고, 자기 구간 끝에 닿으면 방향을 뒤집는다
+  for (const student of students) {
+    student.s = student.s + student.speed;
+    if (student.s > student.maxS || student.s < student.minS) {
+      student.speed = -student.speed;
+    }
+  }
+
+  // 건너는 학생들: 차도를 가로질러 걷다가 반대편 인도 가운데에 닿으면 돌아선다
+  for (let i = 0; i < crossers.length; i++) {
+    const crosser = crossers[i];
+    crosser.offset = crosser.offset + crosser.speed;
+    if (crosser.offset > CROSS_RANGE || crosser.offset < -CROSS_RANGE) {
+      crosser.speed = -crosser.speed;
+    }
+  }
+
+  // 구름 그림자를 오른쪽으로 천천히 옮기고, 맵 오른쪽 끝 밖으로 나가면 왼쪽 끝 밖에서 다시 들어온다
+  for (const cloud of clouds) {
+    cloud.x = cloud.x + cloud.speedX;
+    if (cloud.x - CLOUD_RADIUS * cloud.size > WORLD_RIGHT) {
+      cloud.x = WORLD_LEFT - CLOUD_RADIUS * cloud.size;
+    }
+  }
+
+  // 남은 시간: 출발한 뒤 실제로 흐른 시간(Date.now())으로 잰다
+  // 프레임 수를 세지 않으므로, 화면이 빠른 기기(120Hz)에서도 1초는 똑같이 1초다
+  remainingMs = Math.max(0, TIME_LIMIT * 1000 - (Date.now() - startTime));
+  timeLeft = Math.ceil(remainingMs / 1000);   // 화면에 보여 줄 정수 초 (60 → … → 1 → 0)
+
+  // 도착: 길 위에서 결승(강의실 문 앞)에 닿으면 성공. 점수 = 남은 시간 × 100
+  if (chairOnRoad && chairS >= TRACK_LENGTH - FINISH_MARGIN) {
+    gameState = "finished";
+    score = Math.floor(remainingMs / 10);                       // 남은 ms ÷ 10 = 남은 초 × 100
+    finishSeconds = (TIME_LIMIT * 1000 - remainingMs) / 1000;   // 걸린 시간 (초)
+  } else if (remainingMs === 0) {
+    // 시간 초과: 지각 → 결석 (기획서의 "리타이어")
+    gameState = "gameover";
+    score = 0;
+  }
+}
+
+// ===== 처음 상태로 되돌리기 (R 키로 다시 시작할 때) =====
+// 한 판 동안 바뀌는 값은 전부 여기서 처음 값으로 되돌린다. 빠뜨리면 이전 판의 값이 남는다
+// 게임 루프(gameLoop)는 다시 부르지 않는다. 이미 돌고 있어서, 또 부르면 루프가 두 개가 되어 두 배로 빨라진다
+function resetGame() {
+  // 의자: 출발선 뒤, 멈춘 상태, 트랙 방향을 보고
+  chairX = chairStart.x - CHAIR_SIZE / 2;
+  chairY = chairStart.y - CHAIR_SIZE / 2;
+  chairVX = 0;
+  chairVY = 0;
+  chairAngle = Math.atan2(chairStart.tx, -chairStart.ty);
+  cameraAngle = chairAngle;
+  chairTrackIndex = 0;
+  chairS = 0;
+  chairOnRoad = true;
+  chairOnBridge = false;
+
+  // 장애물: 자동차·콘(부딪혀 사라진 것까지)·건너는 학생을 새로 배치
+  createCars();
+  createCones();
+  createCrossers();
+
+  // 효과와 연출
+  slowTimer = 0;
+  stunTimer = 0;
+  hitCooldown = 0;
+  hitMessageTimer = 0;
+  flashTimer = 0;
+  isDrifting = false;
+  skidMarks = [];
+  smokes = [];
+  lastWheels = null;
+  wrongWayFrames = 0;
+
+  // 시간과 점수
+  startTime = Date.now();
+  remainingMs = TIME_LIMIT * 1000;
+  timeLeft = TIME_LIMIT;
+  score = 0;
+  finishSeconds = 0;
+  gameState = "playing";
 }
 
 // ===== 트랙 만들기: TRACK_POINTS를 TRACK_STEP 간격의 점들로 나눈다 (시작할 때 한 번) =====
@@ -1275,6 +1376,29 @@ function getObstacleHitboxes() {
     boxes.push(box);
   }
   return boxes;
+}
+
+// ===== 결과 화면 그리기 (화면 좌표) =====
+// 화면을 어둡게 덮고, 가운데에 큰 제목 → 줄마다 결과 → 맨 아래 작게 "R 키를 눌러 다시 시작"
+function drawResultScreen(title, titleColor, lines) {
+  ctx.fillStyle = "rgba(0, 0, 0, 0.65)";
+  ctx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+
+  ctx.fillStyle = titleColor;
+  ctx.font = "bold 56px sans-serif";
+  ctx.fillText(title, SCREEN_WIDTH / 2, 200);
+
+  ctx.fillStyle = "#ffffff";
+  ctx.font = "bold 26px sans-serif";
+  for (let i = 0; i < lines.length; i++) {
+    ctx.fillText(lines[i], SCREEN_WIDTH / 2, 280 + i * 42);
+  }
+
+  ctx.fillStyle = "#cccccc";
+  ctx.font = "18px sans-serif";
+  ctx.fillText("R 키를 눌러 다시 시작", SCREEN_WIDTH / 2, 480);
 }
 
 // ===== 미니맵 그리기 (화면 좌표) =====
