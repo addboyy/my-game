@@ -194,7 +194,7 @@ const STUDENT_HITBOX = 30;    // 학생 판정 사각형 한 변 (그림은 52×
 const CONE_HITBOX = 20;       // 콘 판정 사각형 한 변 (그림은 24)
 
 // ===== 디버그 표시 (7장): 화면 왼쪽에 지금 상태(숫자)를 띄운다. D 키로 켜고 끈다 =====
-let showDebug = true;         // true면 디버그 글씨를 띄운다 (제출할 때는 false)
+let showDebug = false;        // true면 디버그 글씨를 띄운다 (제출할 때는 false)
 let showHitbox = showDebug;   // true면 판정 영역을 빨간 테두리로 그린다. showDebug와 같이 켜지고 꺼진다
 
 // 부딪혔을 때 효과 (기획서: 학생 = 슬로우, 자동차 = 튕겨 나가고 잠시 스턴). 시간은 전부 프레임 수 (60 ≈ 1초)
