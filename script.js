@@ -184,7 +184,10 @@ const CHAIR_HITBOX = 33;      // 의자 판정 사각형 한 변 (그림은 50)
 const CAR_HITBOX_SHRINK = 6;  // 자동차 판정은 그림(40×70)보다 가로·세로 6씩 작게
 const STUDENT_HITBOX = 30;    // 학생 판정 사각형 한 변 (그림은 52×36)
 const CONE_HITBOX = 20;       // 콘 판정 사각형 한 변 (그림은 24)
-let showHitbox = false;       // true면 판정 영역을 빨간 테두리로 그린다 (판정이 맞는지 눈으로 확인용)
+
+// ===== 디버그 표시 (7장): 화면 왼쪽에 지금 상태(숫자)를 띄운다. D 키로 켜고 끈다 =====
+let showDebug = true;         // true면 디버그 글씨를 띄운다 (제출할 때는 false)
+let showHitbox = showDebug;   // true면 판정 영역을 빨간 테두리로 그린다. showDebug와 같이 켜지고 꺼진다
 
 // 부딪혔을 때 효과 (기획서: 학생 = 슬로우, 자동차 = 튕겨 나가고 잠시 스턴). 시간은 전부 프레임 수 (60 ≈ 1초)
 const SLOW_FRAMES = 60;       // 학생·콘에 부딪히면 이만큼 느려진다
@@ -369,6 +372,12 @@ document.addEventListener("keydown", function (e) {
   // 한글 입력 상태면 R 자리 키가 "ㄱ"으로 들어오므로, 키 자리 이름(e.code)도 같이 본다
   if ((e.key === "r" || e.key === "R" || e.code === "KeyR") && (gameState === "finished" || gameState === "gameover")) {
     resetGame();
+  }
+
+  // D 키: 디버그 표시와 판정 테두리를 함께 켜고 끈다 (한글 입력 상태의 "ㅇ"도 받게 e.code도 본다)
+  if (e.key === "d" || e.key === "D" || e.code === "KeyD") {
+    showDebug = !showDebug;
+    showHitbox = showDebug;
   }
 
   // 트랙 선택 화면: ← → 로 고르고 Enter로 출발
@@ -851,8 +860,38 @@ function gameLoop() {
     drawTrackSelect();
   }
 
+  // ----- 20. 디버그 표시 (showDebug가 true일 때만): 점수 칸 아래에 지금 숫자들 -----
+  if (showDebug) {
+    drawDebugInfo();
+  }
+
   // ===== ④ 다음 프레임 예약: 다음 그림 때 gameLoop를 또 불러 달라고 부탁한다 =====
   requestAnimationFrame(gameLoop);
+}
+
+// ===== 디버그 정보 그리기 (화면 좌표): 화면에 숫자를 띄워 두면 콘솔을 안 봐도 상태가 보인다 =====
+function drawDebugInfo() {
+  const lines = [
+    "[디버그]  D 키로 끄기",
+    "gameState: " + gameState,
+    "의자 x, y: " + Math.round(chairX) + ", " + Math.round(chairY),
+    "속도: " + Math.hypot(chairVX, chairVY).toFixed(1) + " (최고 " + CHAIR_SPEED + ")",
+    "트랙 위치: " + Math.round(chairS) + " / " + Math.round(TRACK_LENGTH) + (chairOnBridge ? "  (고가 위)" : ""),
+    "자동차 " + cars.length + " · 콘 " + cones.length + " · 건너는 학생 " + crossers.length + " · 인도 학생 " + students.length,
+    "점수(score): " + score + "  · 남은 시간: " + (remainingMs / 1000).toFixed(1) + "초",
+    "슬로우 " + slowTimer + " · 스턴 " + stunTimer + " · 무적 " + hitCooldown,
+    "부스터 게이지: " + boostGauge.toFixed(2) + " · 부스터 " + boostTimer,
+  ];
+  const lineHeight = 17;
+  ctx.fillStyle = "rgba(0, 0, 0, 0.6)";
+  ctx.fillRect(10, 52, 330, lines.length * lineHeight + 10);
+  ctx.fillStyle = "#7CFC00";
+  ctx.font = "12px monospace";
+  ctx.textAlign = "left";
+  ctx.textBaseline = "top";
+  for (let i = 0; i < lines.length; i++) {
+    ctx.fillText(lines[i], 18, 57 + i * lineHeight);
+  }
 }
 
 // ===== 계산: 한 프레임만큼 게임 상태(숫자)를 바꾼다 (gameState가 "playing"일 때만 불린다) =====
