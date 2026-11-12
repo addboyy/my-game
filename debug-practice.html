@@ -1183,6 +1183,7 @@ function resetGame() {
   smokes = [];
   lastWheels = null;
   wrongWayFrames = 0;
+  boostGauge = 0;
   boostTimer = 0;
   burnoutCharge = 0;
   isBurnout = false;
@@ -1737,7 +1738,7 @@ function hitObstacle(box) {
     hitMessage = "슬로우!";
     // 콘은 튕겨 나가서 사라진다 (배열에서 빼낸다)
     if (box.type === "cone") {
-      cones.splice(0, 1);
+      cones.splice(box.index, 1);
     }
   }
 }
