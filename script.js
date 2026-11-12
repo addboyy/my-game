@@ -416,6 +416,21 @@ window.addEventListener("blur", function () {
   }
 });
 
+// 다른 탭으로 가면 브라우저가 게임 루프(requestAnimationFrame)를 멈춘다. 그런데 시계(Date.now)는 계속 가서
+// 돌아오면 의자는 그대로인데 남은 시간만 줄어 있었다 → 숨어 있던 시간만큼 시작 시각들을 뒤로 밀어서 시간도 멈춘 것처럼 만든다
+let hiddenAt = 0;   // 탭이 숨겨진 시각 (0 = 숨겨져 있지 않음)
+document.addEventListener("visibilitychange", function () {
+  if (document.hidden) {
+    hiddenAt = Date.now();
+  } else if (hiddenAt !== 0) {
+    const pausedMs = Date.now() - hiddenAt;
+    startTime = startTime + pausedMs;           // 제한 시간
+    countdownStart = countdownStart + pausedMs; // 3, 2, 1 카운트다운
+    goTime = goTime + pausedMs;                 // GO! 글자와 출발 부스터 판정
+    hiddenAt = 0;
+  }
+});
+
 // ===== 게임 루프: 지우기 → 계산 → 그리기 → 다음 프레임 예약 =====
 
 function gameLoop() {
