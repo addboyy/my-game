@@ -13,17 +13,17 @@ const ctx = canvas.getContext("2d");             // 그 도화지에 그릴 "붓
 // 화면 크기: 가로 800, 세로 600. (0, 0)은 왼쪽 위, y가 커지면 아래로 간다.
 // 맵은 화면보다 훨씬 넓다. 아래 좌표들은 전부 "맵 위의 좌표"다.
 
-// ===== 카메라 (고정 시점 / 추격 시점) =====
-// 화면은 맵의 일부만 비추는 카메라다. 의자를 따라 움직인다.
-// 고정 시점(기본): 화면이 돌지 않는다. 맵 위쪽이 늘 화면 위쪽 (플레이테스트에서 "돌아가는 게 어지럽다"는 말이 두 번 나와서 기본으로)
-// 추격 시점(V 키): 카메라가 의자 뒤에 붙어서, 의자가 도는 대로 같이 돈다
+// ===== 카메라 (추격 시점) =====
+// 화면은 맵의 일부만 비추는 카메라다. 카메라는 의자 뒤에 붙어서, 길이 꺾이는 대로 같이 돈다.
+// 의자 방향이 아니라 "의자 조금 앞의 도로 방향"을 따라 돈다 (8장, 플레이테스트에서 어지럽다는 말이 두 번 나와서)
+//   → 드리프트로 의자가 휙 돌거나, 자동차에 부딪혀 빙글 돌아도 화면은 흔들리지 않고 코너에서만 미리 부드럽게 돈다
 const SCREEN_WIDTH = 800;
 const SCREEN_HEIGHT = 600;
-const CAMERA_ANCHOR_Y = 430;                // 추격 시점에서 의자가 화면에서 머무르는 높이 (가로는 한가운데). 아래쪽이라 앞이 넓게 보인다
-const FIXED_ANCHOR_Y = 320;                 // 고정 시점에서 의자 높이 (어느 쪽으로 가든 앞이 보이게 가운데 근처)
-let cameraMode = loadCameraMode();          // "fixed" = 고정 시점 / "chase" = 추격 시점 (브라우저에 저장)
-let cameraAnchorY = cameraMode === "chase" ? CAMERA_ANCHOR_Y : FIXED_ANCHOR_Y;   // 지금 의자 높이 (시점을 바꾸면 부드럽게 옮겨 간다)
-const CAMERA_TURN_FOLLOW = 0.04;            // 카메라가 의자 방향을 따라 도는 빠르기 (0~1). 작을수록 늦게, 부드럽게 따라 돈다
+const CAMERA_ANCHOR_Y = 430;                // 의자가 화면에서 머무르는 높이 (가로는 한가운데). 아래쪽이라 앞이 넓게 보인다
+const CAMERA_TURN_FOLLOW = 0.04;            // 카메라가 목표 방향을 따라 도는 빠르기 (0~1). 작을수록 늦게, 부드럽게 따라 돈다
+const CAMERA_MAX_TURN = 0.025;              // 한 프레임에 도는 최대 각도 (0.025 ≈ 1.4도 → 직각 코너를 1초쯤에 걸쳐 돈다)
+const CAMERA_LOOK_NEAR = 150;               // 도로 방향을 볼 앞쪽 거리 두 곳 (가까운 곳과 먼 곳을 섞는다)
+const CAMERA_LOOK_FAR = 450;                //   → 코너에 닿기 전에 미리 돌기 시작해서, 코너에서 갑자기 돌지 않는다
 const CAMERA_ZOOM = 0.7;                    // 화면 확대 배율 (1 = 원래 크기). 작을수록 카메라가 멀어져서 넓게 보인다
 const VIEW_RADIUS = 650 / CAMERA_ZOOM;      // 화면이 돌아가도 보일 수 있는 의자 주변 범위 (이 밖은 그리지 않는다)
 let cameraAngle = 0;                        // 카메라가 바라보는 방향 (0 = 맵 위쪽)
@@ -384,12 +384,6 @@ document.addEventListener("keydown", function (e) {
 
   // 키를 누른 순간에 소리 장치를 켠다 (브라우저 소리 제한 풀기)
   unlockAudio();
-
-  // V 키: 고정 시점 ↔ 추격 시점 (한글 입력 상태의 "ㅍ"도 받게 e.code도 본다)
-  if (e.key === "v" || e.key === "V" || e.code === "KeyV") {
-    cameraMode = cameraMode === "chase" ? "fixed" : "chase";
-    saveCameraMode(cameraMode);
-  }
 
   // M 키: 음소거 켜고 끄기 (한글 입력 상태의 "ㅡ"도 받게 e.code도 본다)
   if (e.key === "m" || e.key === "M" || e.code === "KeyM") {
@@ -780,10 +774,10 @@ function resetGame() {
   chairVX = 0;
   chairVY = 0;
   chairAngle = Math.atan2(chairStart.tx, -chairStart.ty);
-  cameraAngle = cameraMode === "chase" ? chairAngle : 0;   // 고정 시점이면 돌지 않은 화면으로
   chairTrackIndex = 0;
   chairS = 0;
   chairOnBridge = false;
+  cameraAngle = roadAngleAhead();   // 출발선의 도로 방향을 보고 (chairS를 0으로 되돌린 뒤에 계산해야 한다)
 
   // 장애물: 자동차·콘(부딪혀 사라진 것까지)·건너는 학생을 새로 배치
   createCars();
@@ -914,30 +908,19 @@ function saveMuted(value) {
   }
 }
 
-// ===== 카메라 움직이기 (매 프레임): 목표 각도·높이 쪽으로 차이의 일부만 옮겨서 부드럽게 =====
-// 추격 시점: 의자가 바라보는 방향으로 천천히 따라 돈다 (한 번에 다 돌면 드리프트할 때 화면이 덜덜 떨린다)
-// 고정 시점: 각도 0(맵 위쪽이 화면 위쪽)으로 돌아가서 멈춘다
-function updateCamera() {
-  const targetAngle = cameraMode === "chase" ? chairAngle : 0;
-  cameraAngle = cameraAngle + angleDiff(targetAngle, cameraAngle) * CAMERA_TURN_FOLLOW;
-  const targetAnchorY = cameraMode === "chase" ? CAMERA_ANCHOR_Y : FIXED_ANCHOR_Y;
-  cameraAnchorY = cameraAnchorY + (targetAnchorY - cameraAnchorY) * 0.08;
+// ===== 의자 앞쪽 도로가 향하는 방향 (0 = 맵 위쪽) =====
+// 가까운 곳과 먼 곳 두 지점의 진행 방향을 더해서 평균 방향을 낸다 → 코너가 다가오면 조금씩 미리 돈다
+function roadAngleAhead() {
+  const near = pointAt(chairS + CAMERA_LOOK_NEAR);
+  const far = pointAt(chairS + CAMERA_LOOK_FAR);
+  return Math.atan2(near.tx + far.tx, -(near.ty + far.ty));
 }
 
-// ===== 시점 저장·불러오기 (브라우저에 저장, 처음엔 고정 시점) =====
-function loadCameraMode() {
-  try {
-    return localStorage.getItem("chairDrift.camera") === "chase" ? "chase" : "fixed";
-  } catch (e) {
-    return "fixed";
-  }
-}
-function saveCameraMode(mode) {
-  try {
-    localStorage.setItem("chairDrift.camera", mode);
-  } catch (e) {
-    // 저장소를 못 쓰면 저장만 건너뛴다
-  }
+// ===== 카메라 돌리기 (매 프레임): 목표 방향 쪽으로 차이의 일부만, 그것도 최대 CAMERA_MAX_TURN까지만 =====
+// 한 번에 다 돌지 않으니 부드럽고, 최대치가 있으니 헤어핀에서도 화면이 휙 돌지 않는다
+function updateCamera() {
+  const turn = angleDiff(roadAngleAhead(), cameraAngle) * CAMERA_TURN_FOLLOW;
+  cameraAngle = cameraAngle + Math.max(-CAMERA_MAX_TURN, Math.min(CAMERA_MAX_TURN, turn));
 }
 
 // ===== 트랙 고르기 =====
@@ -1586,7 +1569,7 @@ function drawStartScreen() {
   ctx.font = "17px sans-serif";
   ctx.fillText("↑↓ 앞뒤 · ←→ 핸들 · Shift 드리프트 · Ctrl 부스터", SCREEN_WIDTH / 2, 350);
   ctx.fillText("학생·콘에 부딪히면 느려지고, 자동차에 부딪히면 튕겨 나가요", SCREEN_WIDTH / 2, 378);
-  ctx.fillText("M 음소거 · V 시점 바꾸기 (고정 / 추격)", SCREEN_WIDTH / 2, 406);
+  ctx.fillText("M 음소거 · 소리는 키를 누른 뒤부터 나요", SCREEN_WIDTH / 2, 406);
 
   // 시작 안내: 0.5초 켜지고 0.4초 꺼지며 깜빡인다
   if (Date.now() % 900 < 500) {
@@ -1965,11 +1948,11 @@ function gameLoop() {
   // 카메라: 네 단계로 붓을 옮긴다. 아래에서부터 거꾸로 읽으면 이해하기 쉽다
   //   ④ 의자 중심이 (0, 0)에 오게 맵을 민다
   //   ③ CAMERA_ZOOM만큼 맵을 작게 줄인다 → 카메라가 멀리서 보는 것처럼 넓게 보인다
-  //   ② 카메라 각도만큼 맵을 반대로 돌린다 → 추격 시점이면 의자가 바라보는 쪽이 화면 위쪽이 된다 (고정 시점은 각도 0)
-  //   ① (0, 0)을 화면의 의자 자리로 옮긴다
+  //   ② 카메라 각도만큼 맵을 반대로 돌린다 → 앞쪽 도로가 향하는 쪽이 화면 위쪽이 된다
+  //   ① (0, 0)을 화면 가운데 아래(의자 자리)로 옮긴다
   // 여기부터 restore 전까지는 전부 "맵 위의 좌표"로 그린다
   ctx.save();
-  ctx.translate(SCREEN_WIDTH / 2, cameraAnchorY);     // ①
+  ctx.translate(SCREEN_WIDTH / 2, CAMERA_ANCHOR_Y);   // ①
   ctx.rotate(-cameraAngle);                           // ②
   ctx.scale(CAMERA_ZOOM, CAMERA_ZOOM);                // ③
   ctx.translate(-chairCenterX, -chairCenterY);        // ④
@@ -2212,12 +2195,12 @@ function gameLoop() {
     ctx.font = "bold 22px sans-serif";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.strokeText(hitMessage, SCREEN_WIDTH / 2, cameraAnchorY - 60);
-    ctx.fillText(hitMessage, SCREEN_WIDTH / 2, cameraAnchorY - 60);
+    ctx.strokeText(hitMessage, SCREEN_WIDTH / 2, CAMERA_ANCHOR_Y - 60);
+    ctx.fillText(hitMessage, SCREEN_WIDTH / 2, CAMERA_ANCHOR_Y - 60);
   }
 
   // 드리프트 중이면 의자 위에 "DRIFT!" 글자를 띄운다
-  // 맵이 아니라 화면에 그려야 화면이 돌아가도 글자가 똑바로 보인다. 의자는 항상 화면의 (가운데, cameraAnchorY) 근처에 있다
+  // 맵이 아니라 화면에 그려야 화면이 돌아가도 글자가 똑바로 보인다. 의자는 항상 화면의 (가운데, CAMERA_ANCHOR_Y) 근처에 있다
   if (isDrifting) {
     ctx.fillStyle = "#ffd84d";
     ctx.strokeStyle = "#000000";
@@ -2225,8 +2208,8 @@ function gameLoop() {
     ctx.font = "bold italic 16px sans-serif";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.strokeText("DRIFT!", SCREEN_WIDTH / 2, cameraAnchorY - 35);   // 검은 테두리를 먼저 그려서
-    ctx.fillText("DRIFT!", SCREEN_WIDTH / 2, cameraAnchorY - 35);     // 어느 배경에서도 잘 보이게
+    ctx.strokeText("DRIFT!", SCREEN_WIDTH / 2, CAMERA_ANCHOR_Y - 35);   // 검은 테두리를 먼저 그려서
+    ctx.fillText("DRIFT!", SCREEN_WIDTH / 2, CAMERA_ANCHOR_Y - 35);     // 어느 배경에서도 잘 보이게
   }
 
   // ----- 미니맵 (화면 오른쪽 위) -----
@@ -2391,16 +2374,14 @@ function gameLoop() {
     drawTrackSelect();
   }
 
-  // ----- 20. 소리·시점 표시 (화면 왼쪽 아래, 모든 화면에서) -----
+  // ----- 20. 소리 표시 (화면 왼쪽 아래, 모든 화면에서) -----
   ctx.fillStyle = "rgba(0, 0, 0, 0.5)";
-  ctx.fillRect(10, SCREEN_HEIGHT - 58, 150, 48);
+  ctx.fillRect(10, SCREEN_HEIGHT - 34, 130, 24);
+  ctx.fillStyle = isMuted ? "#ff8a8a" : "#ffffff";
   ctx.font = "13px sans-serif";
   ctx.textAlign = "left";
   ctx.textBaseline = "middle";
-  ctx.fillStyle = isMuted ? "#ff8a8a" : "#ffffff";
-  ctx.fillText(isMuted ? "🔇 소리 꺼짐 (M)" : "🔊 M: 음소거", 18, SCREEN_HEIGHT - 46);
-  ctx.fillStyle = "#ffffff";
-  ctx.fillText("🎥 V: " + (cameraMode === "chase" ? "추격 시점" : "고정 시점"), 18, SCREEN_HEIGHT - 22);
+  ctx.fillText(isMuted ? "🔇 소리 꺼짐 (M)" : "🔊 M: 음소거", 18, SCREEN_HEIGHT - 22);
 
   // ----- 21. 디버그 표시 (showDebug가 true일 때만): 점수 칸 아래에 지금 숫자들 -----
   if (showDebug) {
