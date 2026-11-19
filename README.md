@@ -12,14 +12,23 @@
 - 횡단보도를 건너는 학생과 공사 콘에 부딪히면 잠깐 느려지고, 자동차에 부딪히면 튕겨 나가 잠시 조작할 수 없습니다.
 - 강의실에 도착하면 **남은 시간 × 100**이 점수가 됩니다. 시간이 다 되면 지각(게임 오버)입니다.
 - 오른쪽 위 미니맵에서 내 위치(빨간 점)와 강의실(노란 점)을 볼 수 있습니다.
+- 출발하고 10초마다 자동차가 빨라집니다 (처음 80% → 최대 130%).
+- 시작 화면 → 트랙 선택 → 카운트다운 → 달리기 → 도착 / 게임 오버 순서로 진행되고, 효과음이 납니다 (M 키로 음소거).
 
 ## 게임 아이디어
 1번 아이디어 Chair Drift (체어 드리프트) 로 선정했다.
 제일 간단하고 내가 좋아하는 레이싱 게임을 만들 수 있을것 같아서 선정했다.
 
 ## 사용한 에셋
-- 자동차(`images/car.png`), 학생(`images/student.png`), 잔디(`images/grass.png`), 나무(`images/tree.png`): Kenney Racing Pack (CC0) — https://kenney.nl/assets/racing-pack
-- 의자(`images/chair.svg`): 직접 만든 SVG
+| 파일 | 용도 | 출처 | 라이선스 |
+|---|---|---|---|
+| images/car.png | 자동차 | Kenney Racing Pack — https://kenney.nl/assets/racing-pack | CC0 |
+| images/student.png | 학생 | Kenney Racing Pack — https://kenney.nl/assets/racing-pack | CC0 |
+| images/grass.png | 잔디 바닥 | Kenney Racing Pack — https://kenney.nl/assets/racing-pack | CC0 |
+| images/tree.png | 나무 | Kenney Racing Pack — https://kenney.nl/assets/racing-pack | CC0 |
+| images/chair.svg | 의자 (플레이어), 탭 아이콘 | 직접 제작 (SVG) | - |
+| 효과음 전부 (카운트다운, 충돌, 부스터, 도착, 시간 초과) | 효과음 | 직접 제작 — 소리 파일 없이 Web Audio API로 코드에서 합성 (`script.js`의 `playSound`) | - |
+| 도로·건물·콘·구름·미니맵 등 나머지 | 배경과 장애물 | 직접 제작 (canvas 도형) | - |
 
 ## 진행 상황
 - [x] 1주차: 자기소개 페이지
@@ -29,8 +38,10 @@
 - [x] 5주차: 조작 (keys 방식 방향키 조작, Shift 드리프트·스키드 마크, 추격 시점 카메라, 고가도로가 있는 긴 트랙, 미니맵, 역주행 경고)
 - [x] 6주차: 규칙 (장애물 배열, 충돌 판정, 슬로우·스턴, 제한 시간 50초, 도착 점수, 게임 오버와 R 키 재시작)
 - [x] 7주차: 디버깅 (debug-practice.html 숨은 버그 3개, D 키 디버그 표시, 탭 전환 시간 버그 수정, script.js 6구역 정리, 디버깅기록.md)
+- [x] 8주차: 게임답게 (시작 화면, 효과음과 M 키 음소거, 10초마다 자동차가 빨라지는 난이도 곡선, 플레이 중 최고 점수 표시)
 
 ## 조작법
+- 시작 화면: 아무 키나 눌러 시작
 - ↑ / ↓: 앞으로 / 뒤로
 - ← / →: 핸들 꺾기 (화면이 의자 뒤에서 같이 돈다)
 - Shift (누른 채로): 드리프트 — 꺾으면 옆으로 미끄러지며 타이어 자국이 남는다
@@ -38,4 +49,5 @@
 - ↑ + ↓ 같이 누르기 → ↓만 떼기: 번아웃 출발 대시
 - 트랙 선택 화면: ← → 고르기, Enter 출발
 - R: 도착하거나 게임 오버가 된 뒤 같은 트랙 다시 / T: 트랙 선택으로
+- M: 소리 켜고 끄기 (음소거 상태는 저장됨)
 - D: 디버그 표시(좌표·장애물 개수·상태·점수)와 판정 테두리 켜고 끄기
