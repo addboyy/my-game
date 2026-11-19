@@ -176,19 +176,36 @@ let wrongWayFrames = 0;       // 역주행이 몇 프레임째 이어지고 있�
 
 // ===== 조작 설정 (여기 숫자를 바꿔 가며 조작 느낌을 튜닝한다) =====
 const CHAIR_SPEED = 9;        // 이동 속도: 한 프레임에 움직이는 픽셀 수 (최고 속도)
-const GRIP = 0.25;            // 평소 접지력 (0~1): 클수록 키를 누른 방향으로 바로 꺾이고 바로 선다
-const DRIFT_GRIP = 0.03;      // Shift 드리프트 중 접지력: 작을수록 관성이 커서 옆으로 오래 미끄러진다
+// 8장: 카트 게임 같은 손맛으로 바꿨다. 속도를 "앞으로 가는 속도"와 "옆으로 미끄러지는 속도"로 나눠서 따로 다룬다
+const ACCEL = 0.035;          // 가속: 매 프레임 최고 속도까지 남은 차이의 이 비율만큼 빨라진다 (약 1.5초면 거의 최고 속도)
+const COAST_DRAG = 0.985;     // ↑를 떼면 매 프레임 이 비율로 줄어든다 (바로 서지 않고 굴러간다)
+const BRAKE = 0.35;           // 앞으로 가다 ↓를 누르면 매 프레임 이만큼 줄어든다 (브레이크)
+const SIDE_GRIP = 0.3;        // 평소 옆 미끄러짐을 잡는 힘 (0~1): 클수록 바퀴가 길에 붙어서 바라보는 쪽으로만 간다
 const TURN_RATE = 0.05;       // ← → 키로 한 프레임에 도는 각도 (라디안, 0.05 ≈ 3도)
+const STEER_FULL_SPEED = 3;   // 이 속도 이상이면 핸들이 다 먹는다. 이보다 느리면 덜 돈다 (멈춰 있으면 안 돈다)
+const HIGH_SPEED_STEER = 0.5;   // 최고 속도일 때 핸들이 먹는 비율 → 빠를 때 급한 코너는 드리프트나 감속이 필요하다
 const REVERSE_SPEED_RATE = 0.5;  // ↓ 키로 뒤로 갈 때는 최고 속도의 이 비율만큼만
 
 let chairVX = 0;              // 의자의 지금 가로 속도 (양수 = 오른쪽)
 let chairVY = 0;              // 의자의 지금 세로 속도 (양수 = 아래)
 let chairAngle = Math.atan2(chairStart.tx, -chairStart.ty);   // 의자가 바라보는 방향 (0 = 위쪽). 처음엔 트랙 진행 방향
 
-// ===== 드리프트 연출 =====
-const DRIFT_TURN_RATE = 0.08; // 드리프트 중에는 더 빨리 돈다 → 몸은 휙 돌고 몸통은 원래 방향으로 미끄러진다
-const DRIFT_MIN_SPEED = 1.5;  // 이 속도보다 느리면 드리프트 연출(자국, 연기)을 하지 않는다
-let isDrifting = false;       // 지금 드리프트로 미끄러지는 중인가 (연출을 켜고 끄는 데 쓴다)
+// ===== 드리프트 (8장: 카트식) =====
+// Shift + 방향키로 시작하면, 그 방향으로 계속 몸을 틀면서 속도를 거의 잃지 않고 커브를 그리며 미끄러진다
+// 같은 방향키: 더 깊게 / 아무것도 안 누름: 보통 / 반대 방향키: 얕게 (카운터)
+// 0.5초 넘게 드리프트하고 Shift를 떼면 짧은 미니 부스트
+const DRIFT_TURN_RATE = 0.075;   // 드리프트 중 한 프레임에 도는 각도 (같은 방향키를 누르고 있을 때)
+const DRIFT_SIDE_GRIP = 0.07;    // 드리프트 중 옆 미끄러짐을 잡는 힘: 작아서 바깥쪽으로 밀리며 미끄러진다
+const DRIFT_SPEED_KEEP = 0.997;  // 드리프트 중 매 프레임 남는 속도 비율 (거의 안 줄어든다)
+const DRIFT_MIN_SPEED = 1.5;     // 이 속도보다 느리면 드리프트 연출(자국, 연기)을 하지 않는다
+const DRIFT_START_SPEED = 4;     // 이 속도 이상일 때만 드리프트를 시작할 수 있다
+const MINI_BOOST_MIN_FRAMES = 30;   // 이만큼(0.5초) 넘게 드리프트해야 미니 부스트
+const MINI_BOOST_FRAMES = 25;       // 미니 부스트 길이 (약 0.4초)
+const MINI_BOOST_RATE = 1.25;       // 미니 부스트 중 최고 속도 배율
+let isDrifting = false;       // 지금 드리프트로 미끄러지는 중인가 (연출과 게이지에 쓴다)
+let driftDir = 0;             // 드리프트 방향 (-1 = 왼쪽, 1 = 오른쪽, 0 = 드리프트 아님)
+let driftFrames = 0;          // 이번 드리프트가 몇 프레임째인가
+let miniBoostTimer = 0;       // 남은 미니 부스트 프레임
 
 // 스키드 마크: 뒷바퀴가 지나간 자리에 남는 타이어 자국 (짧은 선분들의 목록)
 // 선분마다 { x1, y1, x2, y2, life, bridge }. life가 줄어들수록 흐려지고 0이 되면 지운다
@@ -327,7 +344,7 @@ let lastCountBeep = 0;            // 카운트다운에서 마지막으로 삑 �
 const DRIFT_GAUGE_RATE = 0.006;  // 최고 속도로 드리프트할 때 한 프레임에 차는 게이지 (0.006 → 약 2.8초면 가득)
 const BOOST_FRAMES = 90;         // 부스터가 이어지는 프레임 수 (90 = 1.5초)
 const BOOST_SPEED_RATE = 1.6;    // 부스터 중 최고 속도 배율
-const BOOST_GRIP = 0.12;         // 부스터 중 속도가 목표를 따라가는 비율 (확 튀어 나가게)
+const BOOST_GRIP = 0.12;         // 부스터 중 가속 (평소 ACCEL보다 훨씬 커서 확 튀어 나간다)
 let boostGauge = 0;              // 부스터 게이지 (0 = 빈칸, 1 = 가득)
 let boostTimer = 0;              // 남은 부스터 프레임
 
@@ -535,46 +552,91 @@ function updateGame() {
       chairAngle = chairAngle + STUN_SPIN;
     }
 
-    // 2) Shift를 누르고 있으면 드리프트: 접지력이 약해져서 미끄러지고, 핸들은 더 잘 돈다
-    let grip = GRIP;
-    let turnRate = TURN_RATE;
-    if (keys["Shift"] || stunTimer > 0) {
-      grip = DRIFT_GRIP;            // 스턴 중에도 접지력이 약해서 튕긴 힘이 오래 간다
-      turnRate = DRIFT_TURN_RATE;
+    // 2) 지금 속도를 "앞으로 가는 속도(forward)"와 "옆으로 미끄러지는 속도(side)"로 나눈다
+    //    각도 0이 위쪽이라, 바라보는 방향은 (sin, -cos)이고 오른쪽 방향은 (cos, sin)이다
+    let frontX = Math.sin(chairAngle);
+    let frontY = -Math.cos(chairAngle);
+    let forward = chairVX * frontX + chairVY * frontY;
+    let side = chairVX * Math.cos(chairAngle) + chairVY * Math.sin(chairAngle);
+
+    // 3) 드리프트 시작과 끝
+    //    시작: Shift + 방향키, 앞으로 충분히 빠를 때. 끝: Shift를 떼거나, 느려지거나, 스턴
+    if (driftDir === 0 && keys["Shift"] && steer !== 0 && forward > DRIFT_START_SPEED && stunTimer === 0) {
+      driftDir = steer;
+      driftFrames = 0;
+    } else if (driftDir !== 0 && (!keys["Shift"] || forward < DRIFT_MIN_SPEED || stunTimer > 0)) {
+      // 오래 드리프트하고 Shift를 뗐으면 미니 부스트 (부딪혀서 끝난 건 제외)
+      if (driftFrames >= MINI_BOOST_MIN_FRAMES && stunTimer === 0 && forward >= DRIFT_MIN_SPEED) {
+        miniBoostTimer = MINI_BOOST_FRAMES;
+        launchText = "미니 부스트!";
+        launchMessageTimer = 30;
+        playSound("boost");
+      }
+      driftDir = 0;
     }
 
-    // 3) 핸들: 의자가 바라보는 방향을 돌린다 (바퀴 달린 의자라 제자리에서도 돈다)
-    chairAngle = chairAngle + steer * turnRate;
+    // 4) 핸들: 속도가 붙어야 돈다 (멈춰 있으면 거의 안 돈다). 뒤로 갈 때는 자동차처럼 반대로 돈다
+    //    STEER_FULL_SPEED에서 가장 잘 돌고, 그보다 빠를수록 조금씩 덜 돈다 (최고 속도에서 HIGH_SPEED_STEER배)
+    const speedRatio = Math.min(1, Math.max(0, (Math.abs(forward) - STEER_FULL_SPEED) / (CHAIR_SPEED - STEER_FULL_SPEED)));
+    const steerPower = Math.min(1, Math.abs(forward) / STEER_FULL_SPEED) * (1 - (1 - HIGH_SPEED_STEER) * speedRatio) * (forward < 0 ? -1 : 1);
+    let sideGrip = SIDE_GRIP;
+    if (driftDir !== 0) {
+      // 드리프트 중: 키와 상관없이 드리프트 방향으로 계속 돈다. 같은 방향키면 깊게, 반대 방향키면 얕게
+      let depth = 0.65;
+      if (steer === driftDir) depth = 1;
+      if (steer === -driftDir) depth = 0.3;
+      chairAngle = chairAngle + driftDir * DRIFT_TURN_RATE * depth;
+      sideGrip = DRIFT_SIDE_GRIP;
+      forward = forward * DRIFT_SPEED_KEEP;
+      driftFrames = driftFrames + 1;
+    } else {
+      chairAngle = chairAngle + steer * TURN_RATE * steerPower;
+    }
+    if (stunTimer > 0) sideGrip = DRIFT_SIDE_GRIP;   // 스턴 중에는 미끄러워서 튕긴 힘이 오래 간다
 
-    // 4) 최고 속도
+    // 5) 최고 속도
     let maxSpeed = CHAIR_SPEED;
     // 학생·콘에 부딪혀 슬로우 중이면 더 느려진다
     if (slowTimer > 0) {
       maxSpeed = maxSpeed * SLOW_SPEED_RATE;
     }
-    // 부스터 중이면 더 빨라지고, 목표 속도를 빨리 따라간다 (드리프트 중이 아닐 때만)
+    // 부스터 중이면 더 빨라지고 확 튀어 나간다
+    let accel = ACCEL;
     if (boostTimer > 0) {
       maxSpeed = maxSpeed * BOOST_SPEED_RATE;
-      if (!keys["Shift"] && stunTimer === 0) grip = Math.max(grip, BOOST_GRIP);
+      accel = BOOST_GRIP;
+    } else if (miniBoostTimer > 0) {
+      maxSpeed = maxSpeed * MINI_BOOST_RATE;
+      accel = BOOST_GRIP;
     }
 
-    // 5) 목표 속도 = 의자가 바라보는 방향 × 최고 속도 × throttle
-    //    각도 0이 위쪽이라, 바라보는 방향의 가로 성분은 sin, 세로 성분은 -cos이다
-    const targetVX = Math.sin(chairAngle) * maxSpeed * throttle;
-    const targetVY = -Math.cos(chairAngle) * maxSpeed * throttle;
+    // 6) 앞으로 가는 속도: ↑ = 최고 속도까지 점점 가속 / ↓ = 브레이크, 서면 뒤로 / 안 누름 = 굴러가며 서서히 준다
+    //    최고 속도보다 빠르면(부스터가 끝난 뒤, 슬로우) 천천히 최고 속도로 내려온다
+    if (throttle > 0) {
+      if (forward < maxSpeed) forward = forward + (maxSpeed - forward) * accel;
+      else forward = forward + (maxSpeed - forward) * 0.05;
+    } else if (throttle < 0) {
+      if (forward > 0) forward = Math.max(0, forward - BRAKE);
+      else forward = forward + (maxSpeed * throttle - forward) * ACCEL;
+    } else {
+      forward = forward * COAST_DRAG;
+      if (forward > maxSpeed) forward = forward + (maxSpeed - forward) * 0.05;
+    }
 
-    // 6) 지금 속도가 목표 속도를 grip 비율만큼만 따라간다
-    //    grip이 크면 바라보는 쪽으로 바로 가고, 작으면 원래 가던 쪽으로 계속 미끄러진다 (관성 = 드리프트)
-    chairVX = chairVX + (targetVX - chairVX) * grip;
-    chairVY = chairVY + (targetVY - chairVY) * grip;
+    // 7) 옆으로 미끄러지는 속도는 접지력만큼 줄인다 (평소엔 금방 0이 되고, 드리프트 중엔 오래 남는다)
+    side = side * (1 - sideGrip);
 
-    // 7) 속도만큼 위치를 옮긴다
+    // 8) 두 속도를 다시 합쳐서, 속도만큼 위치를 옮긴다 (핸들로 각도가 바뀌었으니 새 방향으로 합친다)
+    frontX = Math.sin(chairAngle);
+    frontY = -Math.cos(chairAngle);
+    chairVX = frontX * forward + Math.cos(chairAngle) * side;
+    chairVY = frontY * forward + Math.sin(chairAngle) * side;
     chairX = chairX + chairVX;
     chairY = chairY + chairVY;
 
-    // 8) 지금 드리프트 중인가: Shift를 누르고 있고, 어느 정도 빠르게 움직이는 중
+    // 9) 지금 드리프트로 미끄러지는 중인가 (자국·연기·게이지)
     const speed = Math.hypot(chairVX, chairVY);               // 지금 속력 (가로·세로 속도로 만든 빗변 길이)
-    isDrifting = keys["Shift"] && speed > DRIFT_MIN_SPEED;
+    isDrifting = driftDir !== 0 && speed > DRIFT_MIN_SPEED;
 
     // 드리프트로 미끄러지는 동안 부스터 게이지가 찬다 (빠를수록 빨리)
     if (isDrifting) {
@@ -628,6 +690,7 @@ function updateGame() {
   hitMessageTimer = Math.max(0, hitMessageTimer - 1);
   flashTimer = Math.max(0, flashTimer - 1);
   boostTimer = Math.max(0, boostTimer - 1);
+  miniBoostTimer = Math.max(0, miniBoostTimer - 1);
   launchMessageTimer = Math.max(0, launchMessageTimer - 1);
 
   // 번아웃 중에는 뒷바퀴에서 연기가 난다 (세 프레임에 한 번꼴, 힘이 모일수록 조금 더 크게)
@@ -791,6 +854,9 @@ function resetGame() {
   hitMessageTimer = 0;
   flashTimer = 0;
   isDrifting = false;
+  driftDir = 0;
+  driftFrames = 0;
+  miniBoostTimer = 0;
   skidMarks = [];
   smokes = [];
   lastWheels = null;
