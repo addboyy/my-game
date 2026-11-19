@@ -291,6 +291,13 @@ const GAUGE_X = 300;
 const GAUGE_Y = 570;
 const GAUGE_WIDTH = 200;
 const GAUGE_HEIGHT = 14;
+// ===== 소리 (8장): 소리 파일 없이 Web Audio로 그 자리에서 만든다 (직접 제작) =====
+// 브라우저는 키를 한 번이라도 누르기 전에는 소리를 못 내게 막는다 → 키를 누를 때 unlockAudio()로 소리를 켠다
+const SOUND_VOLUME = 0.25;        // 전체 음량 (0~1). 교실에서 쓰니까 작게
+let audioCtx = null;              // 소리를 만드는 장치 (처음 키를 누를 때 만든다)
+let isMuted = loadMuted();        // M 키 음소거 (브라우저에 저장해서 새로고침해도 유지)
+let lastCountBeep = 0;            // 카운트다운에서 마지막으로 삑 소리를 낸 숫자 (3, 2, 1)
+
 // ===== 부스터 (기획서: 드리프트하면 게이지가 차고, 다 차면 Ctrl로 부스터) =====
 const DRIFT_GAUGE_RATE = 0.006;  // 최고 속도로 드리프트할 때 한 프레임에 차는 게이지 (0.006 → 약 2.8초면 가득)
 const BOOST_FRAMES = 90;         // 부스터가 이어지는 프레임 수 (90 = 1.5초)
@@ -348,6 +355,15 @@ document.addEventListener("keydown", function (e) {
   // 한글 입력 상태면 R 자리 키가 "ㄱ"으로 들어오므로, 키 자리 이름(e.code)도 같이 본다
   if ((e.key === "r" || e.key === "R" || e.code === "KeyR") && (gameState === "finished" || gameState === "gameover")) {
     resetGame();
+  }
+
+  // 키를 누른 순간에 소리 장치를 켠다 (브라우저 소리 제한 풀기)
+  unlockAudio();
+
+  // M 키: 음소거 켜고 끄기 (한글 입력 상태의 "ㅡ"도 받게 e.code도 본다)
+  if (e.key === "m" || e.key === "M" || e.code === "KeyM") {
+    isMuted = !isMuted;
+    saveMuted(isMuted);
   }
 
   // 시작 화면: 아무 키나 누르면 트랙 선택으로 (이 키는 여기서 끝낸다. Enter가 트랙 선택까지 바로 넘어가지 않게)
@@ -468,6 +484,7 @@ function updateGame() {
         chairVY = -Math.cos(chairAngle) * CHAIR_SPEED * burnoutCharge;
         launchText = "출발!";
         launchMessageTimer = 40;
+        playSound("boost");
       }
       burnoutCharge = 0;
     }
@@ -477,6 +494,7 @@ function updateGame() {
     if (boostPressed && !boostWasPressed && boostGauge >= 1 && stunTimer === 0) {
       boostTimer = BOOST_FRAMES;
       boostGauge = 0;
+      playSound("boost");
     }
     boostWasPressed = boostPressed;
     // 부스터 중에는 ↑를 안 눌러도 앞으로 나간다
@@ -703,10 +721,12 @@ function updateGame() {
     score = Math.floor(remainingMs / 10);                       // 남은 ms ÷ 10 = 남은 초 × 100
     finishSeconds = (TIME_LIMIT * 1000 - remainingMs) / 1000;   // 걸린 시간 (초)
     isNewRecord = saveBest(TRACK_INDEX, score);                 // 이 트랙 최고 점수면 저장
+    playSound(isNewRecord ? "record" : "finish");
   } else if (remainingMs === 0) {
     // 시간 초과: 지각 → 결석 (기획서의 "리타이어")
     gameState = "gameover";
     score = 0;
+    playSound("gameover");
   }
 }
 
@@ -754,6 +774,102 @@ function resetGame() {
   score = 0;
   finishSeconds = 0;
   startCountdown();   // 바로 달리지 않고 3, 2, 1 카운트다운부터
+}
+
+// ===== 소리 장치 켜기: 키를 누를 때마다 불린다 (이미 켜져 있으면 아무것도 안 한다) =====
+function unlockAudio() {
+  try {
+    if (!audioCtx) {
+      const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+      if (!AudioContextClass) return;   // 소리를 못 내는 브라우저면 소리 없이
+      audioCtx = new AudioContextClass();
+    }
+    if (audioCtx.state === "suspended") audioCtx.resume();
+  } catch (e) {
+    audioCtx = null;   // 소리 장치를 못 만들어도 게임은 계속
+  }
+}
+
+// ===== 삑 소리 하나: freq(높이, Hz)에서 시작해 endFreq로 미끄러지며 ms 동안, volume으로 =====
+// type: "sine"(부드럽게) / "square"(삑삑) / "sawtooth"(지잉) / "triangle"(통통)
+// delay만큼 늦게 시작한다 (멜로디를 만들 때)
+function playTone(freq, endFreq, ms, type, volume, delay) {
+  const start = audioCtx.currentTime + (delay || 0) / 1000;
+  const end = start + ms / 1000;
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  osc.type = type;
+  osc.frequency.setValueAtTime(freq, start);
+  osc.frequency.exponentialRampToValueAtTime(endFreq, end);
+  gain.gain.setValueAtTime(volume * SOUND_VOLUME, start);
+  gain.gain.exponentialRampToValueAtTime(0.001, end);   // 점점 작아지며 끝난다 (뚝 끊기는 소리 없이)
+  osc.connect(gain);
+  gain.connect(audioCtx.destination);
+  osc.start(start);
+  osc.stop(end);
+}
+
+// ===== 치익 소리: 무작위 잡음 (부딪히는 소리) =====
+function playNoise(ms, volume) {
+  const length = Math.floor(audioCtx.sampleRate * ms / 1000);
+  const buffer = audioCtx.createBuffer(1, length, audioCtx.sampleRate);
+  const data = buffer.getChannelData(0);
+  for (let i = 0; i < length; i++) {
+    data[i] = (Math.random() * 2 - 1) * (1 - i / length);   // 뒤로 갈수록 작게
+  }
+  const source = audioCtx.createBufferSource();
+  const gain = audioCtx.createGain();
+  gain.gain.value = volume * SOUND_VOLUME;
+  source.buffer = buffer;
+  source.connect(gain);
+  gain.connect(audioCtx.destination);
+  source.start();
+}
+
+// ===== 효과음 재생: 이름으로 부른다. 음소거거나 소리 장치가 없으면 조용히 넘어간다 =====
+// 소리마다 새로 만들어서 재생하니까, 빠르게 연달아 나도 끊기지 않고 겹쳐서 난다
+function playSound(name) {
+  if (isMuted || !audioCtx) return;
+  try {
+    if (name === "count") playTone(440, 440, 150, "square", 0.5);         // 3, 2, 1: 짧은 삑
+    if (name === "go") playTone(880, 880, 400, "square", 0.5);            // GO!: 높고 긴 삑
+    if (name === "bump") playTone(260, 120, 120, "triangle", 0.9);        // 학생·콘: 통
+    if (name === "crash") {                                               // 자동차: 쾅
+      playNoise(300, 0.8);
+      playTone(150, 50, 300, "sawtooth", 0.6);
+    }
+    if (name === "boost") playTone(200, 900, 450, "sawtooth", 0.35);      // 부스터: 지이잉 올라가는 소리
+    if (name === "finish" || name === "record") {                        // 도착: 도-미-솔-도
+      const notes = [523, 659, 784, 1047];
+      for (let i = 0; i < notes.length; i++) {
+        playTone(notes[i], notes[i], 180, "triangle", 0.7, i * 120);
+      }
+      if (name === "record") playTone(1319, 1319, 400, "triangle", 0.7, 520);   // 신기록이면 한 음 더
+    }
+    if (name === "gameover") {                                            // 시간 초과: 내려가는 음
+      playTone(392, 392, 250, "square", 0.4);
+      playTone(330, 330, 250, "square", 0.4, 250);
+      playTone(262, 196, 500, "square", 0.4, 500);
+    }
+  } catch (e) {
+    // 소리에 문제가 생겨도 게임은 멈추지 않게
+  }
+}
+
+// ===== 음소거 상태 저장·불러오기 (브라우저에 저장) =====
+function loadMuted() {
+  try {
+    return localStorage.getItem("chairDrift.muted") === "true";   // 저장된 건 글자라서 "true"와 비교한다
+  } catch (e) {
+    return false;
+  }
+}
+function saveMuted(value) {
+  try {
+    localStorage.setItem("chairDrift.muted", String(value));
+  } catch (e) {
+    // 저장소를 못 쓰면 저장만 건너뛴다
+  }
 }
 
 // ===== 트랙 고르기 =====
@@ -840,14 +956,22 @@ function startCountdown() {
   countdownStart = Date.now();
   upPressTime = 0;
   startBoostChecked = false;
+  lastCountBeep = 0;
 }
 
 // ===== 카운트다운 중 매 프레임: 3초가 지나면 GO! (그때부터 제한 시간이 흐른다) =====
 function updateCountdown() {
+  // 숫자가 바뀔 때마다 한 번씩 삑 (3, 2, 1)
+  const count = Math.ceil((COUNTDOWN_MS - (Date.now() - countdownStart)) / 1000);
+  if (count > 0 && count !== lastCountBeep) {
+    lastCountBeep = count;
+    playSound("count");
+  }
   if (Date.now() - countdownStart >= COUNTDOWN_MS) {
     gameState = "playing";
     goTime = Date.now();
     startTime = goTime;
+    playSound("go");
   }
 }
 
@@ -858,6 +982,7 @@ function checkStartBoost() {
   const inWindow = upPressTime >= goTime - START_BOOST_EARLY_MS && upPressTime <= goTime + START_BOOST_LATE_MS;
   if (upPressTime !== 0 && inWindow) {
     boostTimer = START_BOOST_FRAMES;
+    playSound("boost");
     chairVX = Math.sin(chairAngle) * CHAIR_SPEED;   // 바로 튀어 나가게 속도를 준다
     chairVY = -Math.cos(chairAngle) * CHAIR_SPEED;
     launchText = "출발 부스터!";
@@ -1289,12 +1414,14 @@ function hitObstacle(box) {
     stunTimer = STUN_FRAMES;
     flashTimer = 15;
     hitMessage = "쾅! 스턴";
+    playSound("crash");
   } else {
     // 학생·콘 → 슬로우: 속도를 확 줄이고 한동안 느리게
     chairVX = chairVX * 0.3;
     chairVY = chairVY * 0.3;
     slowTimer = SLOW_FRAMES;
     hitMessage = "슬로우!";
+    playSound("bump");
     // 콘은 튕겨 나가서 사라진다 (배열에서 빼낸다)
     if (box.type === "cone") {
       cones.splice(box.index, 1);
@@ -1391,6 +1518,7 @@ function drawStartScreen() {
   ctx.font = "17px sans-serif";
   ctx.fillText("↑↓ 앞뒤 · ←→ 핸들 · Shift 드리프트 · Ctrl 부스터", SCREEN_WIDTH / 2, 350);
   ctx.fillText("학생·콘에 부딪히면 느려지고, 자동차에 부딪히면 튕겨 나가요", SCREEN_WIDTH / 2, 378);
+  ctx.fillText("M 음소거 · 소리는 키를 누른 뒤부터 나요", SCREEN_WIDTH / 2, 406);
 
   // 시작 안내: 0.5초 켜지고 0.4초 꺼지며 깜빡인다
   if (Date.now() % 900 < 500) {
@@ -2189,7 +2317,16 @@ function gameLoop() {
     drawTrackSelect();
   }
 
-  // ----- 20. 디버그 표시 (showDebug가 true일 때만): 점수 칸 아래에 지금 숫자들 -----
+  // ----- 20. 소리 표시 (화면 왼쪽 아래, 모든 화면에서) -----
+  ctx.fillStyle = "rgba(0, 0, 0, 0.5)";
+  ctx.fillRect(10, SCREEN_HEIGHT - 34, 130, 24);
+  ctx.fillStyle = isMuted ? "#ff8a8a" : "#ffffff";
+  ctx.font = "13px sans-serif";
+  ctx.textAlign = "left";
+  ctx.textBaseline = "middle";
+  ctx.fillText(isMuted ? "🔇 소리 꺼짐 (M)" : "🔊 M: 음소거", 18, SCREEN_HEIGHT - 22);
+
+  // ----- 21. 디버그 표시 (showDebug가 true일 때만): 점수 칸 아래에 지금 숫자들 -----
   if (showDebug) {
     drawDebugInfo();
   }
