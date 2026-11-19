@@ -216,11 +216,17 @@ let chairVY = 0;              // 의자의 지금 세로 속도 (양수 = 아래
 let chairAngle = Math.atan2(chairStart.tx, -chairStart.ty);   // 의자가 바라보는 방향 (0 = 위쪽). 처음엔 트랙 진행 방향
 
 // ===== 드리프트 (8장: 카트식) =====
-// Shift + 방향키로 시작하면, 그 방향으로 계속 몸을 틀면서 속도를 거의 잃지 않고 커브를 그리며 미끄러진다
-// 같은 방향키: 더 깊게 / 아무것도 안 누름: 보통 / 반대 방향키: 얕게 (카운터)
-// 0.5초 넘게 드리프트하고 Shift를 떼면 짧은 미니 부스트
-const DRIFT_TURN_RATE = 0.075;   // 드리프트 중 한 프레임에 도는 각도 (같은 방향키를 누르고 있을 때)
-const DRIFT_SIDE_GRIP = 0.07;    // 드리프트 중 옆 미끄러짐을 잡는 힘: 작아서 바깥쪽으로 밀리며 미끄러진다
+// Shift + 방향키로 시작하면, 앞머리가 커브 안쪽으로 DRIFT_SLIP만큼 꺾인 채로 고정되고
+// 의자가 "지나가는 길"이 부드러운 원을 그린다 (몸통이 빙글빙글 돌지 않는다)
+// 같은 방향키: 원이 좁아진다(깊게) / 아무것도 안 누름: 보통 / 반대 방향키: 원이 넓어진다(얕게)
+// Shift를 떼면 앞머리 쪽으로 빠져나가고, 0.5초 넘게 드리프트했으면 미니 부스트
+const DRIFT_CURVE_IN = 0.05;     // 같은 방향키: 지나가는 길이 한 프레임에 꺾이는 각도 (최고 속도에서 반지름 약 180)
+const DRIFT_CURVE = 0.034;       // 방향키 없음
+const DRIFT_CURVE_OUT = 0.018;   // 반대 방향키 (카운터)
+const DRIFT_SLIP = 0.6;          // 앞머리가 지나가는 방향보다 안쪽으로 꺾이는 각도 (0.6 ≈ 35도)
+const DRIFT_SLIP_FOLLOW = 0.2;   // 앞머리가 그 각도까지 꺾이는 빠르기 (0~1)
+const DRIFT_EXIT_KEEP = 0.5;     // Shift를 뗄 때 꺾인 각도를 이 비율만 남기고 앞머리를 펴 준다 (휙 꺾여 나가지 않게)
+const DRIFT_SIDE_GRIP = 0.07;    // 스턴 중 옆 미끄러짐을 잡는 힘 (미끄러워서 튕긴 힘이 오래 간다)
 const DRIFT_SPEED_KEEP = 0.997;  // 드리프트 중 매 프레임 남는 속도 비율 (거의 안 줄어든다)
 const DRIFT_MIN_SPEED = 1.5;     // 이 속도보다 느리면 드리프트 연출(자국, 연기)을 하지 않는다
 const DRIFT_START_SPEED = 4;     // 이 속도 이상일 때만 드리프트를 시작할 수 있다
@@ -230,6 +236,7 @@ const MINI_BOOST_RATE = 1.25;       // 미니 부스트 중 최고 속도 배율
 let isDrifting = false;       // 지금 드리프트로 미끄러지는 중인가 (연출과 게이지에 쓴다)
 let driftDir = 0;             // 드리프트 방향 (-1 = 왼쪽, 1 = 오른쪽, 0 = 드리프트 아님)
 let driftFrames = 0;          // 이번 드리프트가 몇 프레임째인가
+let driftSlip = 0;            // 지금 앞머리가 지나가는 방향보다 안쪽으로 꺾여 있는 각도
 let miniBoostTimer = 0;       // 남은 미니 부스트 프레임
 
 // 스키드 마크: 뒷바퀴가 지나간 자리에 남는 타이어 자국 (짧은 선분들의 목록)
@@ -618,6 +625,7 @@ function updateGame() {
     if (driftDir === 0 && keys["Shift"] && steer !== 0 && forward > DRIFT_START_SPEED && stunTimer === 0) {
       driftDir = steer;
       driftFrames = 0;
+      driftSlip = 0;
     } else if (driftDir !== 0 && (!keys["Shift"] || forward < DRIFT_MIN_SPEED || stunTimer > 0)) {
       // 오래 드리프트하고 Shift를 뗐으면 미니 부스트 (부딪혀서 끝난 건 제외)
       if (driftFrames >= MINI_BOOST_MIN_FRAMES && stunTimer === 0 && forward >= DRIFT_MIN_SPEED) {
@@ -626,7 +634,17 @@ function updateGame() {
         launchMessageTimer = 30;
         playSound("boost");
       }
+      // 앞머리를 지나가는 방향 쪽으로 반쯤 펴 준다 (꺾인 채로 놓으면 그쪽으로 휙 꺾여 나간다)
+      if (stunTimer === 0) {
+        const moveAngle = Math.atan2(chairVX, -chairVY);
+        chairAngle = moveAngle + driftDir * driftSlip * DRIFT_EXIT_KEEP;
+        frontX = Math.sin(chairAngle);
+        frontY = -Math.cos(chairAngle);
+        forward = chairVX * frontX + chairVY * frontY;
+        side = chairVX * Math.cos(chairAngle) + chairVY * Math.sin(chairAngle);
+      }
       driftDir = 0;
+      driftSlip = 0;
     }
 
     // 4) 핸들: 속도가 붙어야 돈다 (멈춰 있으면 거의 안 돈다). 뒤로 갈 때는 자동차처럼 반대로 돈다
@@ -634,22 +652,30 @@ function updateGame() {
     const speedRatio = Math.min(1, Math.max(0, (Math.abs(forward) - STEER_FULL_SPEED) / (CHAIR_SPEED - STEER_FULL_SPEED)));
     const steerPower = Math.min(1, Math.abs(forward) / STEER_FULL_SPEED) * (1 - (1 - HIGH_SPEED_STEER) * speedRatio) * (forward < 0 ? -1 : 1);
     let sideGrip = SIDE_GRIP;
-    if (driftDir !== 0) {
-      // 드리프트 중: 키와 상관없이 드리프트 방향으로 계속 돈다. 같은 방향키면 깊게, 반대 방향키면 얕게
-      let depth = 0.65;
-      if (steer === driftDir) depth = 1;
-      if (steer === -driftDir) depth = 0.3;
-      chairAngle = chairAngle + driftDir * DRIFT_TURN_RATE * depth;
-      sideGrip = DRIFT_SIDE_GRIP;
-      forward = forward * DRIFT_SPEED_KEEP;
-      driftFrames = driftFrames + 1;
-    } else {
+    if (driftDir === 0) {
       chairAngle = chairAngle + steer * TURN_RATE * steerPower;
     }
     if (stunTimer > 0) sideGrip = DRIFT_SIDE_GRIP;   // 스턴 중에는 미끄러워서 튕긴 힘이 오래 간다
 
     // 5) 최고 속도
     let maxSpeed = CHAIR_SPEED;
+    if (driftDir !== 0) {
+      // ----- 드리프트 중: 지나가는 길을 원으로 꺾고, 앞머리는 그보다 안쪽으로 꺾인 채로 -----
+      let curve = DRIFT_CURVE;
+      let slipTarget = DRIFT_SLIP;
+      if (steer === driftDir) { curve = DRIFT_CURVE_IN; slipTarget = DRIFT_SLIP * 1.15; }
+      if (steer === -driftDir) { curve = DRIFT_CURVE_OUT; slipTarget = DRIFT_SLIP * 0.7; }
+      const moveAngle = Math.atan2(chairVX, -chairVY) + driftDir * curve;   // 지금 가는 방향에서 조금 더 꺾는다
+      let driftSpeed = Math.hypot(chairVX, chairVY) * DRIFT_SPEED_KEEP;
+      if (boostTimer > 0) driftSpeed = Math.max(driftSpeed, CHAIR_SPEED * BOOST_SPEED_RATE * 0.9);   // 부스터 중엔 빠르게
+      driftSlip = driftSlip + (slipTarget - driftSlip) * DRIFT_SLIP_FOLLOW;
+      chairAngle = moveAngle + driftDir * driftSlip;
+      chairVX = Math.sin(moveAngle) * driftSpeed;
+      chairVY = -Math.cos(moveAngle) * driftSpeed;
+      chairX = chairX + chairVX;
+      chairY = chairY + chairVY;
+      driftFrames = driftFrames + 1;
+    } else {
     // 학생·콘에 부딪혀 슬로우 중이면 더 느려진다
     if (slowTimer > 0) {
       maxSpeed = maxSpeed * SLOW_SPEED_RATE;
@@ -687,6 +713,7 @@ function updateGame() {
     chairVY = frontY * forward + Math.sin(chairAngle) * side;
     chairX = chairX + chairVX;
     chairY = chairY + chairVY;
+    }
 
     // 9) 지금 드리프트로 미끄러지는 중인가 (자국·연기·게이지)
     const speed = Math.hypot(chairVX, chairVY);               // 지금 속력 (가로·세로 속도로 만든 빗변 길이)
@@ -916,6 +943,7 @@ function resetGame() {
   isDrifting = false;
   driftDir = 0;
   driftFrames = 0;
+  driftSlip = 0;
   miniBoostTimer = 0;
   skidMarks = [];
   smokes = [];
