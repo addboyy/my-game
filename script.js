@@ -278,9 +278,10 @@ let remainingMs = TIME_LIMIT * 1000;   // 남은 시간 (밀리초)
 let timeLeft = TIME_LIMIT;        // 화면에 보여 줄 남은 시간 (정수 초)
 
 // ===== 게임 상태와 점수 (6장) =====
-// "select" = 트랙 선택 화면 / "countdown" = 출발 전 3, 2, 1 / "playing" = 달리는 중
+// "start" = 시작 화면 (8장) / "select" = 트랙 선택 화면 / "countdown" = 출발 전 3, 2, 1 / "playing" = 달리는 중
 // "finished" = 강의실 도착 (성공) / "gameover" = 시간 초과 (결석)
-let gameState = STARTED_FROM_MENU ? "countdown" : "select";
+// 처음 열면 시작 화면. 트랙을 골라 페이지를 다시 불러온 경우(?track=)에는 바로 카운트다운
+let gameState = STARTED_FROM_MENU ? "countdown" : "start";
 let score = 0;                    // 점수 = 도착했을 때 남은 시간 × 100 (시간 초과면 0)
 let finishSeconds = 0;            // 도착까지 걸린 시간 (초)
 const FINISH_MARGIN = 60;         // 결승 지점 이만큼 앞에 닿으면 도착으로 친다
@@ -347,6 +348,12 @@ document.addEventListener("keydown", function (e) {
   // 한글 입력 상태면 R 자리 키가 "ㄱ"으로 들어오므로, 키 자리 이름(e.code)도 같이 본다
   if ((e.key === "r" || e.key === "R" || e.code === "KeyR") && (gameState === "finished" || gameState === "gameover")) {
     resetGame();
+  }
+
+  // 시작 화면: 아무 키나 누르면 트랙 선택으로 (이 키는 여기서 끝낸다. Enter가 트랙 선택까지 바로 넘어가지 않게)
+  if (gameState === "start") {
+    gameState = "select";
+    return;
   }
 
   // D 키: 디버그 표시와 판정 테두리를 함께 켜고 끈다 (한글 입력 상태의 "ㅇ"도 받게 e.code도 본다)
@@ -1357,6 +1364,42 @@ function getObstacleHitboxes() {
   return boxes;
 }
 
+// ===== 시작 화면 그리기 (화면 좌표, 8장) =====
+// 제목 → 목표 한 줄 → 조작법 → "아무 키나 눌러 시작"(깜빡임). 링크만 받은 사람도 뭘 해야 하는지 알게
+function drawStartScreen() {
+  ctx.fillStyle = "rgba(0, 0, 0, 0.7)";
+  ctx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+
+  // 제목: 노란 글씨에 검은 테두리, 살짝 기울여서 달리는 느낌
+  ctx.font = "bold italic 72px sans-serif";
+  ctx.strokeStyle = "#000000";
+  ctx.lineWidth = 8;
+  ctx.strokeText("Chair Drift", SCREEN_WIDTH / 2, 150);
+  ctx.fillStyle = "#ffd84d";
+  ctx.fillText("Chair Drift", SCREEN_WIDTH / 2, 150);
+  ctx.drawImage(chairImage, SCREEN_WIDTH / 2 - 30, 200, 60, 60);
+
+  // 목표 한 줄
+  ctx.fillStyle = "#ffffff";
+  ctx.font = "bold 22px sans-serif";
+  ctx.fillText("바퀴 달린 의자를 타고 제한 시간 안에 강의실까지!", SCREEN_WIDTH / 2, 300);
+
+  // 조작법
+  ctx.fillStyle = "#cccccc";
+  ctx.font = "17px sans-serif";
+  ctx.fillText("↑↓ 앞뒤 · ←→ 핸들 · Shift 드리프트 · Ctrl 부스터", SCREEN_WIDTH / 2, 350);
+  ctx.fillText("학생·콘에 부딪히면 느려지고, 자동차에 부딪히면 튕겨 나가요", SCREEN_WIDTH / 2, 378);
+
+  // 시작 안내: 0.5초 켜지고 0.4초 꺼지며 깜빡인다
+  if (Date.now() % 900 < 500) {
+    ctx.fillStyle = "#7CFC00";
+    ctx.font = "bold 24px sans-serif";
+    ctx.fillText("아무 키나 눌러 시작", SCREEN_WIDTH / 2, 480);
+  }
+}
+
 // ===== 트랙 선택 화면 그리기 (화면 좌표) =====
 // 트랙 카드를 가로로 늘어놓고, 고르고 있는 카드는 노란 테두리로 크게
 function drawTrackSelect() {
@@ -2139,8 +2182,10 @@ function gameLoop() {
     }
   }
 
-  // ----- 19. 트랙 선택 화면 (맨 위에 덮는다) -----
-  if (gameState === "select") {
+  // ----- 19. 시작 화면 / 트랙 선택 화면 (맨 위에 덮는다) -----
+  if (gameState === "start") {
+    drawStartScreen();
+  } else if (gameState === "select") {
     drawTrackSelect();
   }
 
