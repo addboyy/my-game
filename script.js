@@ -304,6 +304,7 @@ const CAR_COUNT = TRACK.carCount;   // 트랙마다 다르다 (트랙 목록에�
 let cars = [];
 const CAR_RESPAWN_AHEAD = 2500;   // 자동차가 멀어지면 의자보다 이만큼 앞에 다시 나타난다
 const CAR_RESPAWN_BEHIND = 1500;  // 의자보다 이만큼 뒤로 처지면 다시 나타나게 한다
+const CAR_GAP = CAR_HEIGHT * 1.5; // 같은 차선 앞차와 이보다 가까워지지 않는다 (차 가운데끼리 거리. 겹치거나 뚫고 지나가지 않게)
 const CAR_INSIDE_BUILDING = 150;  // 결승을 지나 이만큼 더 가면 강의실 건물 안에 완전히 가려진다
 
 // 공사 콘: 차도 위에 가만히 놓인 장애물. 한 개는 { s: 트랙 거리, offset: 길 가운데에서 옆으로 떨어진 거리 }
@@ -825,7 +826,20 @@ function updateGame() {
   // 자동차들을 for 반복문으로 한 대씩 트랙을 따라 옮긴다 (몇 대든 이 코드 그대로)
   for (let i = 0; i < cars.length; i++) {
     const car = cars[i];
-    car.s = car.s + car.speed * carSpeedRate;   // 난이도 배율만큼 빠르게
+    let move = car.speed * carSpeedRate;   // 난이도 배율만큼 빠르게
+    // 같은 차선 바로 앞차를 찾는다 (같은 방향 차는 s가 큰 쪽이 앞, 마주 오는 차는 s가 작은 쪽이 앞)
+    const dir = car.speed > 0 ? 1 : -1;
+    let gapAhead = Infinity;
+    for (let j = 0; j < cars.length; j++) {
+      if (j === i || cars[j].lane !== car.lane) continue;
+      const gap = (cars[j].s - car.s) * dir;
+      if (gap > 0 || (gap === 0 && j > i)) gapAhead = Math.min(gapAhead, gap);   // 딱 겹친 두 대는 번호로 앞뒤를 정한다
+    }
+    // 앞차가 느려서 가까워지면 CAR_GAP만 남기고 멈춘다 → 앞차 뒤에서 따라간다
+    if (gapAhead - Math.abs(move) < CAR_GAP) {
+      move = dir * Math.max(0, gapAhead - CAR_GAP);
+    }
+    car.s = car.s + move;
     // 다시 나타날 앞쪽 자리: 차들이 한곳에 몰리지 않게 조금씩 다르게
     const ahead = chairS + CAR_RESPAWN_AHEAD + Math.random() * 1500;
 
@@ -835,16 +849,16 @@ function updateGame() {
       // 단, 의자가 결승 근처라 앞쪽 자리가 트랙 밖이면, 의자 뒤쪽(화면 밖)에 다시 놓는다
       if (car.s < chairS - CAR_RESPAWN_BEHIND || car.s > TRACK_LENGTH + CAR_INSIDE_BUILDING) {
         if (ahead < TRACK_LENGTH) {
-          car.s = ahead;
+          car.s = freeCarSpot(ahead, car);
         } else {
-          car.s = chairS - CAR_RESPAWN_BEHIND + 200;
+          car.s = freeCarSpot(chairS - CAR_RESPAWN_BEHIND + 200, car);
         }
       }
     } else {
       // 마주 오는 차: 의자 뒤로 지나가 버리면, 다시 의자 앞쪽에서 마주 오게 한다
       // 앞쪽 자리가 트랙 끝을 넘으면 강의실 건물 안에서 출발해서, 건물에서 나오는 것처럼 보이게 한다
       if (car.s < chairS - CAR_RESPAWN_BEHIND || car.s < 0) {
-        car.s = Math.min(ahead, TRACK_LENGTH + CAR_INSIDE_BUILDING);
+        car.s = freeCarSpot(Math.min(ahead, TRACK_LENGTH + CAR_INSIDE_BUILDING), car);
       }
     }
   }
@@ -2130,6 +2144,21 @@ function findCrosswalks() {
 
 // ===== 자동차 만들기 =====
 // 짝수 번째는 같은 방향 차, 홀수 번째는 마주 오는 차. 처음 위치와 속도는 조금씩 다르게
+// ===== 자동차가 다시 나타날 빈자리: s 근처에서 같은 차선 차들과 CAR_GAP의 2배 이상 떨어진 곳 =====
+// s → 조금 앞 → 조금 뒤 → 더 앞 → 더 뒤 … 순서로 찾아보고, 끝까지 없으면 그냥 s
+function freeCarSpot(s, self) {
+  for (let k = 0; k < 12; k++) {
+    const step = Math.ceil(k / 2) * CAR_GAP * 2 * (k % 2 === 1 ? 1 : -1);
+    const tryS = s + step;
+    let free = true;
+    for (const other of cars) {
+      if (other !== self && other.lane === self.lane && Math.abs(other.s - tryS) < CAR_GAP * 2) free = false;
+    }
+    if (free) return tryS;
+  }
+  return s;
+}
+
 function createCars() {
   cars = [];
   for (let i = 0; i < CAR_COUNT; i++) {
