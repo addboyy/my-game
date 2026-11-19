@@ -2549,7 +2549,10 @@ function gameLoop() {
   ctx.textBaseline = "middle";
   if (TRACK.training) {
     // 연습 서킷: 몇 번째 바퀴인지와 지금 바퀴 시간
-    const lapSeconds = gameState === "playing" ? (Date.now() - lapStartTime) / 1000 : 0;
+    // 달리는 중이면 지금까지, 일시 정지 중이면 멈춘 순간까지의 시간
+    let lapSeconds = 0;
+    if (gameState === "playing") lapSeconds = (Date.now() - lapStartTime) / 1000;
+    if (gameState === "paused" && pausedFrom === "playing") lapSeconds = (pausedAt - lapStartTime) / 1000;
     ctx.fillStyle = "#ffffff";
     ctx.font = "bold 22px sans-serif";
     ctx.fillText("랩 " + (lapsDone + 1) + " · " + lapSeconds.toFixed(1) + "초", 400, 28);
