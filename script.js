@@ -14,16 +14,14 @@ const ctx = canvas.getContext("2d");             // 그 도화지에 그릴 "붓
 // 맵은 화면보다 훨씬 넓다. 아래 좌표들은 전부 "맵 위의 좌표"다.
 
 // ===== 카메라 (추격 시점) =====
-// 화면은 맵의 일부만 비추는 카메라다. 카메라는 의자 뒤에 붙어서, 길이 꺾이는 대로 같이 돈다.
-// 의자 방향이 아니라 "의자 조금 앞의 도로 방향"을 따라 돈다 (8장, 플레이테스트에서 어지럽다는 말이 두 번 나와서)
-//   → 드리프트로 의자가 휙 돌거나, 자동차에 부딪혀 빙글 돌아도 화면은 흔들리지 않고 코너에서만 미리 부드럽게 돈다
+// 화면은 맵의 일부만 비추는 카메라다. 카메라는 의자 뒤에 붙어서, 의자가 도는 대로 같이 돈다.
+// 8장: 플레이테스트에서 어지럽다는 말이 두 번 나와서, 스턴 중에는 안 따라 돌고, 드리프트 중에는 덜 돌고, 한 프레임에 도는 각도에 상한을 뒀다
 const SCREEN_WIDTH = 800;
 const SCREEN_HEIGHT = 600;
 const CAMERA_ANCHOR_Y = 430;                // 의자가 화면에서 머무르는 높이 (가로는 한가운데). 아래쪽이라 앞이 넓게 보인다
-const CAMERA_TURN_FOLLOW = 0.04;            // 카메라가 목표 방향을 따라 도는 빠르기 (0~1). 작을수록 늦게, 부드럽게 따라 돈다
-const CAMERA_MAX_TURN = 0.025;              // 한 프레임에 도는 최대 각도 (0.025 ≈ 1.4도 → 직각 코너를 1초쯤에 걸쳐 돈다)
-const CAMERA_LOOK_NEAR = 150;               // 도로 방향을 볼 앞쪽 거리 두 곳 (가까운 곳과 먼 곳을 섞는다)
-const CAMERA_LOOK_FAR = 450;                //   → 코너에 닿기 전에 미리 돌기 시작해서, 코너에서 갑자기 돌지 않는다
+const CAMERA_TURN_FOLLOW = 0.06;            // 카메라가 목표 방향을 따라 도는 빠르기 (0~1). 작을수록 늦게, 부드럽게 따라 돈다
+const CAMERA_MAX_TURN = 0.035;              // 한 프레임에 도는 최대 각도 (0.035 ≈ 2도). 의자가 휙 돌아도 화면은 이보다 빨리 안 돈다
+const CAMERA_DRIFT_BLEND = 0.5;             // 드리프트 중 "실제로 움직이는 방향"을 섞는 비율 (0 = 의자 방향만, 1 = 움직이는 방향만)
 const CAMERA_ZOOM = 0.7;                    // 화면 확대 배율 (1 = 원래 크기). 작을수록 카메라가 멀어져서 넓게 보인다
 const VIEW_RADIUS = 650 / CAMERA_ZOOM;      // 화면이 돌아가도 보일 수 있는 의자 주변 범위 (이 밖은 그리지 않는다)
 let cameraAngle = 0;                        // 카메라가 바라보는 방향 (0 = 맵 위쪽)
@@ -902,7 +900,7 @@ function resetGame() {
   chairTrackIndex = 0;
   chairS = 0;
   chairOnBridge = false;
-  cameraAngle = roadAngleAhead();   // 출발선의 도로 방향을 보고 (chairS를 0으로 되돌린 뒤에 계산해야 한다)
+  cameraAngle = chairAngle;         // 카메라도 의자 뒤에서 같은 방향을 보고
 
   // 장애물: 자동차·콘(부딪혀 사라진 것까지)·건너는 학생을 새로 배치
   createCars();
@@ -1040,18 +1038,24 @@ function saveMuted(value) {
   }
 }
 
-// ===== 의자 앞쪽 도로가 향하는 방향 (0 = 맵 위쪽) =====
-// 가까운 곳과 먼 곳 두 지점의 진행 방향을 더해서 평균 방향을 낸다 → 코너가 다가오면 조금씩 미리 돈다
-function roadAngleAhead() {
-  const near = pointAt(chairS + CAMERA_LOOK_NEAR);
-  const far = pointAt(chairS + CAMERA_LOOK_FAR);
-  return Math.atan2(near.tx + far.tx, -(near.ty + far.ty));
+// ===== 카메라가 따라갈 방향 (0 = 맵 위쪽) =====
+// 평소: 의자가 바라보는 방향
+// 드리프트 중: 바라보는 방향과 실제로 미끄러져 가는 방향의 가운데 (의자가 확 틀어져도 화면이 덜 휘둘린다)
+// 스턴 중: 지금 화면 방향 그대로 (빙글 도는 의자를 따라 화면이 돌면 제일 어지럽다)
+function cameraTargetAngle() {
+  if (stunTimer > 0) return cameraAngle;
+  const speed = Math.hypot(chairVX, chairVY);
+  if (isDrifting && speed > DRIFT_MIN_SPEED) {
+    const moveAngle = Math.atan2(chairVX, -chairVY);   // 실제로 움직이는 방향
+    return chairAngle + angleDiff(moveAngle, chairAngle) * CAMERA_DRIFT_BLEND;
+  }
+  return chairAngle;
 }
 
 // ===== 카메라 돌리기 (매 프레임): 목표 방향 쪽으로 차이의 일부만, 그것도 최대 CAMERA_MAX_TURN까지만 =====
-// 한 번에 다 돌지 않으니 부드럽고, 최대치가 있으니 헤어핀에서도 화면이 휙 돌지 않는다
+// 한 번에 다 돌지 않으니 부드럽고, 최대치가 있으니 의자가 휙 돌아도 화면은 천천히 따라온다
 function updateCamera() {
-  const turn = angleDiff(roadAngleAhead(), cameraAngle) * CAMERA_TURN_FOLLOW;
+  const turn = angleDiff(cameraTargetAngle(), cameraAngle) * CAMERA_TURN_FOLLOW;
   cameraAngle = cameraAngle + Math.max(-CAMERA_MAX_TURN, Math.min(CAMERA_MAX_TURN, turn));
 }
 
