@@ -291,6 +291,15 @@ const GAUGE_X = 300;
 const GAUGE_Y = 570;
 const GAUGE_WIDTH = 200;
 const GAUGE_HEIGHT = 14;
+// ===== 난이도 곡선 (8장): 출발하고 시간이 지날수록 자동차가 빨라진다 =====
+// 프레임 수가 아니라 실제로 흐른 시간(Date.now() - startTime)으로 잰다 → 120Hz 기기에서도 똑같이 어려워진다
+const CAR_SPEED_START = 0.8;      // 처음 자동차 속도 배율 (원래 속도의 80%: 처음 10초는 쉽게)
+const CAR_SPEED_STEP = 0.1;       // 한 번 어려워질 때마다 늘어나는 배율
+const CAR_SPEED_MAX = 1.3;        // 상한: 이보다 빨라지지 않는다 (원래 속도의 130%)
+const LEVEL_UP_SECONDS = 10;      // 몇 초마다 어려워지나
+let carSpeedRate = CAR_SPEED_START;    // 지금 자동차 속도 배율
+let nextLevelUp = LEVEL_UP_SECONDS;    // 다음에 어려워질 시점 (출발 후 초). 한 번만 올리려고 다음 시점을 미뤄 둔다
+
 // ===== 소리 (8장): 소리 파일 없이 Web Audio로 그 자리에서 만든다 (직접 제작) =====
 // 브라우저는 키를 한 번이라도 누르기 전에는 소리를 못 내게 막는다 → 키를 누를 때 unlockAudio()로 소리를 켠다
 const SOUND_VOLUME = 0.25;        // 전체 음량 (0~1). 교실에서 쓰니까 작게
@@ -444,6 +453,7 @@ function drawDebugInfo() {
     "점수(score): " + score + "  · 남은 시간: " + (remainingMs / 1000).toFixed(1) + "초",
     "슬로우 " + slowTimer + " · 스턴 " + stunTimer + " · 무적 " + hitCooldown,
     "부스터 게이지: " + boostGauge.toFixed(2) + " · 부스터 " + boostTimer,
+    "자동차 속도 ×" + carSpeedRate.toFixed(1) + " · 다음 상승 " + nextLevelUp + "초",
   ];
   const lineHeight = 17;
   ctx.fillStyle = "rgba(0, 0, 0, 0.6)";
@@ -658,7 +668,7 @@ function updateGame() {
   // 자동차들을 for 반복문으로 한 대씩 트랙을 따라 옮긴다 (몇 대든 이 코드 그대로)
   for (let i = 0; i < cars.length; i++) {
     const car = cars[i];
-    car.s = car.s + car.speed;
+    car.s = car.s + car.speed * carSpeedRate;   // 난이도 배율만큼 빠르게
     // 다시 나타날 앞쪽 자리: 차들이 한곳에 몰리지 않게 조금씩 다르게
     const ahead = chairS + CAR_RESPAWN_AHEAD + Math.random() * 1500;
 
@@ -714,6 +724,17 @@ function updateGame() {
   // 프레임 수를 세지 않으므로, 화면이 빠른 기기(120Hz)에서도 1초는 똑같이 1초다
   remainingMs = Math.max(0, TIME_LIMIT * 1000 - (Date.now() - startTime));
   timeLeft = Math.ceil(remainingMs / 1000);   // 화면에 보여 줄 정수 초 (60 → … → 1 → 0)
+
+  // 난이도: 출발 후 LEVEL_UP_SECONDS초마다 자동차가 빨라진다 (상한 CAR_SPEED_MAX에서 멈춘다)
+  const elapsedSeconds = (Date.now() - startTime) / 1000;
+  if (elapsedSeconds > nextLevelUp && remainingMs > 0) {   // 시간이 다 된 순간에는 올리지 않는다 (결과 화면에 글자가 뜨지 않게)
+    nextLevelUp = nextLevelUp + LEVEL_UP_SECONDS;   // 다음 시점을 미뤄 둔다 (안 그러면 매 프레임 올라간다)
+    if (carSpeedRate < CAR_SPEED_MAX) {
+      carSpeedRate = Math.min(carSpeedRate + CAR_SPEED_STEP, CAR_SPEED_MAX);
+      launchText = "자동차가 빨라졌다!";
+      launchMessageTimer = 50;
+    }
+  }
 
   // 도착: 길 위에서 결승(강의실 문 앞)에 닿으면 성공. 점수 = 남은 시간 × 100
   if (chairS >= TRACK_LENGTH - FINISH_MARGIN) {
@@ -773,6 +794,8 @@ function resetGame() {
   timeLeft = TIME_LIMIT;
   score = 0;
   finishSeconds = 0;
+  carSpeedRate = CAR_SPEED_START;   // 난이도도 처음으로
+  nextLevelUp = LEVEL_UP_SECONDS;
   startCountdown();   // 바로 달리지 않고 3, 2, 1 카운트다운부터
 }
 
@@ -2275,7 +2298,7 @@ function gameLoop() {
   if (launchMessageTimer > 0) bigText = launchText;
   else if (boostTimer > 0) bigText = "BOOST!";
   if (bigText !== "") {
-    ctx.fillStyle = bigText === "너무 빨랐어요" ? "#cccccc" : "#ff9f1c";
+    ctx.fillStyle = bigText === "너무 빨랐어요" ? "#cccccc" : bigText === "자동차가 빨라졌다!" ? "#ff5c5c" : "#ff9f1c";
     ctx.strokeStyle = "#000000";
     ctx.lineWidth = 6;
     ctx.font = "bold italic 40px sans-serif";
