@@ -457,13 +457,13 @@ function drawDebugInfo() {
   ];
   const lineHeight = 17;
   ctx.fillStyle = "rgba(0, 0, 0, 0.6)";
-  ctx.fillRect(10, 52, 330, lines.length * lineHeight + 10);
+  ctx.fillRect(10, 70, 330, lines.length * lineHeight + 10);
   ctx.fillStyle = "#7CFC00";
   ctx.font = "12px monospace";
   ctx.textAlign = "left";
   ctx.textBaseline = "top";
   for (let i = 0; i < lines.length; i++) {
-    ctx.fillText(lines[i], 18, 57 + i * lineHeight);
+    ctx.fillText(lines[i], 18, 75 + i * lineHeight);
   }
 }
 
@@ -2250,7 +2250,7 @@ function gameLoop() {
 
   // ----- 14. 점수 (화면 왼쪽 위): 지금 도착하면 받을 점수 = 남은 시간 × 100 -----
   ctx.fillStyle = "rgba(0, 0, 0, 0.5)";
-  ctx.fillRect(10, 10, 170, 36);
+  ctx.fillRect(10, 10, 170, 54);
   ctx.fillStyle = "#ffffff";
   ctx.font = "bold 18px sans-serif";
   ctx.textAlign = "left";
@@ -2260,6 +2260,11 @@ function gameLoop() {
   } else {
     ctx.fillText("점수: " + score, 20, 28);
   }
+  // 그 아래 작게: 이 트랙 최고 점수 (8장: 플레이 중에도 목표가 보이게)
+  const bestScore = loadBest(TRACK_INDEX);
+  ctx.fillStyle = "#ffd84d";
+  ctx.font = "13px sans-serif";
+  ctx.fillText(bestScore > 0 ? "최고 점수: " + bestScore : "최고 점수: 기록 없음", 20, 51);
 
   // ----- 15. 결과 화면: 도착(성공) 또는 게임 오버(시간 초과) -----
   if (gameState === "finished") {
