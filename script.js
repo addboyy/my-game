@@ -34,6 +34,7 @@ let cameraAngle = 0;                        // 카메라가 바라보는 방향 
 // 꼭짓점은 출발부터 강의실(결승)까지 순서대로 직선으로 잇고, 꼭짓점마다 모서리를 반지름 CORNER_RADIUS인 원호로 둥글게 깎는다
 // bridge: true인 점에서 다음 점까지의 직선은 고가도로다 (다른 길 위를 지나간다)
 // 결승(마지막 점)이 맨 위에 있어야 한다 (그 위는 강의실 건물). 나란한 길끼리는 700 이상 떨어뜨린다
+// training: true인 트랙(연습 서킷)은 예외: 처음 점과 마지막 점이 같은 자리(직선 한가운데)라 한 바퀴로 이어진다
 const TRACKS = [
   {
     name: "캠퍼스 산책로",
@@ -106,6 +107,32 @@ const TRACKS = [
       { x: 1600, y: -4000 },   // 강의실 앞 (결승)
     ],
   },
+  {
+    // 연습 서킷 (8장): 장애물도 제한 시간도 없이 계속 돈다. 한 바퀴마다 랩 시간을 잰다
+    // 직각 코너 좌우 섞기 + S자. 처음 점과 마지막 점이 같은 자리라 끝이 처음으로 이어진다
+    name: "연습 서킷",
+    level: "연습",
+    levelColor: "#7ec8ff",
+    training: true,
+    timeLimit: 0,         // 제한 시간 없음
+    carCount: 0,
+    coneCount: 0,
+    carSpeedStart: 1,
+    carSpeedStep: 0,
+    carSpeedMax: 1,
+    points: [
+      { x: 0, y: 0 },          // 출발 (위로)
+      { x: 0, y: -2000 },      // → 오른쪽
+      { x: 1600, y: -2000 },   // → 아래로
+      { x: 1600, y: -800 },    // → 왼쪽
+      { x: 900, y: -800 },     // → 아래로 (S자)
+      { x: 900, y: 1100 },     // → 왼쪽
+      { x: -900, y: 1100 },    // → 위로
+      { x: -900, y: 300 },     // → 오른쪽
+      { x: 0, y: 300 },        // → 위로
+      { x: 0, y: 0 },          // 출발 자리로 돌아와서 한 바퀴
+    ],
+  },
 ];
 // 지금 달리는 트랙: 주소 뒤의 ?track=번호로 고른다 (없으면 선택 화면부터, 기본은 "보통")
 const TRACK_INDEX = readTrackIndex();
@@ -138,7 +165,7 @@ const FINISH = trackSamples[trackSamples.length - 1];          // 결승 지점 
 const WORLD_LEFT = Math.min(...TRACK_POINTS.map(p => p.x)) - 900;
 const WORLD_RIGHT = Math.max(...TRACK_POINTS.map(p => p.x)) + 900;
 const WORLD_BOTTOM = Math.max(...TRACK_POINTS.map(p => p.y)) + 600;
-const WORLD_TOP = FINISH.y;   // 강의실 건물 아래쪽 끝 (여기보다 위로는 못 간다)
+const WORLD_TOP = TRACK.training ? Math.min(...TRACK_POINTS.map(p => p.y)) - 900 : FINISH.y;   // 강의실 건물 아래쪽 끝 (여기보다 위로는 못 간다). 연습 서킷은 강의실이 없다
 
 // 나무와 풀: 시작할 때 길을 피해 잔디 위에 자동으로 배치한다 (아래 placeScenery 함수)
 const TREE_SIZE = 80;
@@ -318,6 +345,22 @@ let score = 0;                    // 점수 = 도착했을 때 남은 시간 × 
 let finishSeconds = 0;            // 도착까지 걸린 시간 (초)
 const FINISH_MARGIN = 60;         // 결승 지점 이만큼 앞에 닿으면 도착으로 친다
 
+// ===== 연습 서킷 랩 기록 (8장) =====
+// 트랙을 따라 실제로 달린 거리를 더해 간다 (뒤로 가면 빠진다 → 거꾸로 돌아서 랩을 채울 수 없다)
+// 의자는 출발선보다 150 뒤에서 출발하니까, 150을 달리면 출발선, 거기서 한 바퀴(TRACK_LENGTH)마다 1랩
+const LAP_LINE_OFFSET = 150;
+let lapDistance = 0;              // 출발해서 트랙을 따라 앞으로 달린 거리
+let lapLastS = START_LINE_S - 150;   // 직전 프레임의 chairS (얼마나 갔는지 비교용)
+let lapsDone = 0;                 // 다 돈 바퀴 수
+let lapStartTime = 0;             // 지금 바퀴를 시작한 시각 (Date.now())
+let lastLapSeconds = 0;           // 직전 바퀴 기록 (초, 0 = 아직 없음)
+
+// ===== 일시 정지 메뉴 (8장, Esc 키) =====
+const PAUSE_OPTIONS = ["계속 달리기", "처음부터 다시", "트랙 선택으로"];
+let pauseIndex = 0;               // 메뉴에서 고르고 있는 줄
+let pausedFrom = "";              // 멈추기 전 상태 ("countdown" 또는 "playing") → 계속하면 여기로
+let pausedAt = 0;                 // 멈춘 시각 (계속할 때 멈춰 있던 시간만큼 시계를 민다)
+
 // 부스터 게이지: 화면 아래 가운데
 const GAUGE_X = 300;
 const GAUGE_Y = 570;
@@ -386,6 +429,21 @@ document.addEventListener("keydown", function (e) {
   // 방향키·스페이스바로 페이지가 스크롤되어 게임이 흔들리지 않게, 브라우저 기본 동작을 막는다
   if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", " ", "Control", "Enter"].includes(e.key)) {
     e.preventDefault();
+  }
+
+  // Esc: 달리는 중(카운트다운 포함)이면 일시 정지 메뉴, 메뉴에서는 계속하기, 트랙 선택 화면에서는 시작 화면으로
+  if (e.key === "Escape") {
+    if (gameState === "playing" || gameState === "countdown") pauseGame();
+    else if (gameState === "paused") resumeGame();
+    else if (gameState === "select") gameState = "start";
+    return;
+  }
+  // 일시 정지 메뉴: ↑↓로 고르고 Enter. 메뉴 중에는 키가 게임에 들어가지 않게 여기서 끝낸다
+  if (gameState === "paused") {
+    if (e.key === "ArrowUp") pauseIndex = (pauseIndex + PAUSE_OPTIONS.length - 1) % PAUSE_OPTIONS.length;
+    if (e.key === "ArrowDown") pauseIndex = (pauseIndex + 1) % PAUSE_OPTIONS.length;
+    if (e.key === "Enter") choosePauseOption();
+    return;
   }
 
   // ↑를 새로 누른 순간을 기록한다 (출발 부스터 판정용). 꾹 누르고 있을 때 반복해서 들어오는 건 무시
@@ -462,10 +520,8 @@ document.addEventListener("visibilitychange", function () {
   if (document.hidden) {
     hiddenAt = Date.now();
   } else if (hiddenAt !== 0) {
-    const pausedMs = Date.now() - hiddenAt;
-    startTime = startTime + pausedMs;           // 제한 시간
-    countdownStart = countdownStart + pausedMs; // 3, 2, 1 카운트다운
-    goTime = goTime + pausedMs;                 // GO! 글자와 출발 부스터 판정
+    // 일시 정지 중이었으면 건너뛴다 (계속할 때 멈춰 있던 시간 전체를 한꺼번에 민다)
+    if (gameState !== "paused") shiftClocks(Date.now() - hiddenAt);
     hiddenAt = 0;
   }
 });
@@ -796,6 +852,12 @@ function updateGame() {
     }
   }
 
+  // 연습 서킷: 제한 시간도 결승도 없다. 랩만 잰다
+  if (TRACK.training) {
+    updateLaps();
+    return;
+  }
+
   // 남은 시간: 출발한 뒤 실제로 흐른 시간(Date.now())으로 잰다
   // 프레임 수를 세지 않으므로, 화면이 빠른 기기(120Hz)에서도 1초는 똑같이 1초다
   remainingMs = Math.max(0, TIME_LIMIT * 1000 - (Date.now() - startTime));
@@ -874,6 +936,10 @@ function resetGame() {
   score = 0;
   finishSeconds = 0;
   carSpeedRate = CAR_SPEED_START;   // 난이도도 처음으로
+  lapDistance = 0;                  // 연습 서킷 랩도 처음으로
+  lapLastS = START_LINE_S - 150;
+  lapsDone = 0;
+  lastLapSeconds = 0;
   nextLevelUp = LEVEL_UP_SECONDS;
   startCountdown();   // 바로 달리지 않고 3, 2, 1 카운트다운부터
 }
@@ -989,6 +1055,111 @@ function updateCamera() {
   cameraAngle = cameraAngle + Math.max(-CAMERA_MAX_TURN, Math.min(CAMERA_MAX_TURN, turn));
 }
 
+// ===== 연습 서킷 랩 재기 (달리는 중 매 프레임) =====
+function updateLaps() {
+  // 이번 프레임에 트랙을 따라 간 거리. 끝 → 처음으로 넘어가면 숫자가 확 바뀌니 한 바퀴만큼 보정한다
+  let delta = chairS - lapLastS;
+  if (delta > TRACK_LENGTH / 2) delta = delta - TRACK_LENGTH;
+  if (delta < -TRACK_LENGTH / 2) delta = delta + TRACK_LENGTH;
+  lapLastS = chairS;
+  lapDistance = lapDistance + delta;
+
+  // 출발선을 지나 한 바퀴를 채울 때마다 1랩
+  const done = lapDistance >= LAP_LINE_OFFSET ? Math.floor((lapDistance - LAP_LINE_OFFSET) / TRACK_LENGTH) : 0;
+  if (done > lapsDone) {
+    lapsDone = done;
+    lastLapSeconds = (Date.now() - lapStartTime) / 1000;
+    lapStartTime = Date.now();
+    const record = saveBestLap(TRACK_INDEX, lastLapSeconds);
+    launchText = record ? "랩 신기록! " + lastLapSeconds.toFixed(2) + "초" : "랩 " + lastLapSeconds.toFixed(2) + "초";
+    launchMessageTimer = 90;
+    playSound(record ? "record" : "finish");
+  }
+}
+
+// ===== 연습 서킷 최고 랩 (브라우저에 저장, 짧을수록 좋다) =====
+function loadBestLap(index) {
+  try {
+    return Number(localStorage.getItem("chairDrift.bestLap." + index)) || 0;   // 없으면 0
+  } catch (e) {
+    return 0;
+  }
+}
+// 더 짧은 기록이면 저장하고 true를 돌려준다
+function saveBestLap(index, seconds) {
+  const best = loadBestLap(index);
+  if (best > 0 && seconds >= best) return false;
+  try {
+    localStorage.setItem("chairDrift.bestLap." + index, seconds.toFixed(2));
+  } catch (e) {
+    // 저장소를 못 쓰면 저장만 건너뛴다
+  }
+  return true;
+}
+
+// ===== 시계 밀기: 멈춰 있던 시간(ms)만큼 시작 시각들을 뒤로 → 멈춘 동안 시간이 안 흐른 것처럼 =====
+// 탭을 숨겼다 돌아올 때와 일시 정지에서 계속할 때 쓴다
+function shiftClocks(ms) {
+  startTime = startTime + ms;           // 제한 시간
+  countdownStart = countdownStart + ms; // 3, 2, 1 카운트다운
+  goTime = goTime + ms;                 // GO! 글자와 출발 부스터 판정
+  lapStartTime = lapStartTime + ms;     // 연습 서킷 랩 시계
+  if (upPressTime !== 0) upPressTime = upPressTime + ms;
+}
+
+// ===== 일시 정지 / 계속 / 메뉴 고르기 =====
+function pauseGame() {
+  pausedFrom = gameState;
+  gameState = "paused";
+  pausedAt = Date.now();
+  pauseIndex = 0;
+  for (const key in keys) {
+    keys[key] = false;   // 누르고 있던 키는 뗀 것으로 (계속했을 때 혼자 달려 나가지 않게)
+  }
+}
+function resumeGame() {
+  shiftClocks(Date.now() - pausedAt);
+  gameState = pausedFrom;
+}
+function choosePauseOption() {
+  if (pauseIndex === 0) {
+    resumeGame();
+  } else if (pauseIndex === 1) {
+    resetGame();             // 처음부터 다시 (3, 2, 1부터)
+  } else {
+    menuIndex = TRACK_INDEX;
+    gameState = "select";
+  }
+}
+
+// ===== 일시 정지 메뉴 그리기 (화면 좌표) =====
+function drawPauseMenu() {
+  ctx.fillStyle = "rgba(0, 0, 0, 0.7)";
+  ctx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillStyle = "#ffffff";
+  ctx.font = "bold 44px sans-serif";
+  ctx.fillText("일시 정지", SCREEN_WIDTH / 2, 170);
+  for (let i = 0; i < PAUSE_OPTIONS.length; i++) {
+    const y = 260 + i * 60;
+    const selected = i === pauseIndex;
+    ctx.fillStyle = selected ? "rgba(255, 216, 77, 0.2)" : "rgba(255, 255, 255, 0.06)";
+    ctx.fillRect(SCREEN_WIDTH / 2 - 150, y - 24, 300, 48);
+    if (selected) {
+      ctx.strokeStyle = "#ffd84d";
+      ctx.lineWidth = 3;
+      ctx.strokeRect(SCREEN_WIDTH / 2 - 150, y - 24, 300, 48);
+    }
+    ctx.fillStyle = selected ? "#ffd84d" : "#ffffff";
+    ctx.font = "bold 22px sans-serif";
+    ctx.fillText(PAUSE_OPTIONS[i], SCREEN_WIDTH / 2, y);
+  }
+  ctx.fillStyle = "#aaaaaa";
+  ctx.font = "15px sans-serif";
+  ctx.fillText("↑↓ 고르기 · Enter 확인 · Esc 계속", SCREEN_WIDTH / 2, 470);
+}
+
 // ===== 트랙 고르기 =====
 // 주소 뒤의 ?track=번호를 읽는다. 없거나 이상하면 1번(보통)
 function readTrackIndex() {
@@ -1088,6 +1259,7 @@ function updateCountdown() {
     gameState = "playing";
     goTime = Date.now();
     startTime = goTime;
+    lapStartTime = goTime;   // 연습 서킷 첫 바퀴 시계
     playSound("go");
   }
 }
@@ -1203,6 +1375,8 @@ function buildTrack() {
 
 // ===== 트랙 위의 한 지점: 시작에서 거리 s만큼 간 곳의 위치와 진행 방향 =====
 function pointAt(s) {
+  // 연습 서킷은 한 바퀴로 이어져 있어서, 끝을 넘은 거리는 처음부터 다시 센다
+  if (TRACK.training) s = ((s % TRACK_LENGTH) + TRACK_LENGTH) % TRACK_LENGTH;
   // s보다 처음으로 크거나 같은 점을 반씩 나눠 찾는다 (이진 탐색: 점이 많아도 빠르다)
   if (s <= 0) return trackSamples[0];
   if (s >= TRACK_LENGTH) return trackSamples[trackSamples.length - 1];
@@ -1238,11 +1412,14 @@ function updateChairTrack() {
 
   // 1) 직전에 있던 트랙 점 앞뒤 TRACK_SEARCH개 중에서만 가장 가까운 점을 찾는다
   //    트랙 전체에서 찾으면, 고가와 그 아래 길이 겹치는 곳에서 다른 층의 길로 건너뛰어 버린다
-  const from = Math.max(0, chairTrackIndex - TRACK_SEARCH);
-  const to = Math.min(trackSamples.length - 1, chairTrackIndex + TRACK_SEARCH);
+  //    연습 서킷은 끝과 처음이 이어져 있어서, 번호가 끝을 넘으면 처음으로 돌아가서 찾는다 (마지막 점은 처음 점과 같은 자리라 뺀다)
+  const loopCount = trackSamples.length - 1;
+  const from = TRACK.training ? chairTrackIndex - TRACK_SEARCH : Math.max(0, chairTrackIndex - TRACK_SEARCH);
+  const to = TRACK.training ? chairTrackIndex + TRACK_SEARCH : Math.min(trackSamples.length - 1, chairTrackIndex + TRACK_SEARCH);
   let nearest = chairTrackIndex;
   let nearestDist = Infinity;
-  for (let i = from; i <= to; i++) {
+  for (let k = from; k <= to; k++) {
+    const i = TRACK.training ? ((k % loopCount) + loopCount) % loopCount : k;
     const dx = trackSamples[i].x - cx;
     const dy = trackSamples[i].y - cy;
     const dist = dx * dx + dy * dy;   // 거리의 제곱 (비교만 하니 제곱근을 안 구해도 된다)
@@ -1608,6 +1785,42 @@ function getObstacleHitboxes() {
   return boxes;
 }
 
+// ===== 강의실 건물과 문 그리기 (맵 좌표, 결승 지점 위) =====
+function drawClassroom() {
+  // ----- 10. 강의실 건물 (결승 지점 위) -----
+  // 화면이 돌면 맵 끝 바깥과 건물 뒤쪽도 보이므로, 건물을 바깥까지 넉넉히 칠한다
+  ctx.fillStyle = "#9c4a3a";
+  ctx.fillRect(WORLD_LEFT - VIEW_RADIUS, WORLD_TOP - VIEW_RADIUS * 2, WORLD_RIGHT - WORLD_LEFT + VIEW_RADIUS * 2, VIEW_RADIUS * 2);
+
+  // 건물 지붕 끝선: 아래쪽에 진한 띠
+  ctx.fillStyle = "#6e2f24";
+  ctx.fillRect(WORLD_LEFT - VIEW_RADIUS, WORLD_TOP - 8, WORLD_RIGHT - WORLD_LEFT + VIEW_RADIUS * 2, 8);
+
+  // 창문: 하늘색 사각형을 일정한 간격으로 (문 자리는 비운다)
+  ctx.fillStyle = "#a8dadc";
+  for (let x = WORLD_LEFT + 30; x < WORLD_RIGHT; x += 90) {
+    if (x > DOOR_X - 60 && x < DOOR_X + DOOR_WIDTH) {
+      continue;   // 문이 있는 자리에는 창문을 그리지 않는다
+    }
+    ctx.fillRect(x, WORLD_TOP - 45, 50, 26);
+  }
+
+  // ----- 11. 강의실 문 (도착 지점) -----
+  // [새로 시도] 그라데이션: 위는 진한 노랑, 아래는 밝은 노랑
+  const doorGradient = ctx.createLinearGradient(0, DOOR_Y, 0, DOOR_Y + DOOR_HEIGHT);
+  doorGradient.addColorStop(0, "#e6b800");
+  doorGradient.addColorStop(1, "#ffe066");
+  ctx.fillStyle = doorGradient;
+  ctx.fillRect(DOOR_X, DOOR_Y, DOOR_WIDTH, DOOR_HEIGHT);
+
+  // 문 위에 "강의실" 글자
+  ctx.fillStyle = "#333333";
+  ctx.font = "bold 20px sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText("강의실", DOOR_X + DOOR_WIDTH / 2, DOOR_Y + DOOR_HEIGHT / 2);
+}
+
 // ===== 시작 화면 그리기 (화면 좌표, 8장) =====
 // 제목 → 목표 한 줄 → 조작법 → "아무 키나 눌러 시작"(깜빡임). 링크만 받은 사람도 뭘 해야 하는지 알게
 function drawStartScreen() {
@@ -1635,7 +1848,7 @@ function drawStartScreen() {
   ctx.font = "17px sans-serif";
   ctx.fillText("↑↓ 앞뒤 · ←→ 핸들 · Shift 드리프트 · Ctrl 부스터", SCREEN_WIDTH / 2, 350);
   ctx.fillText("학생·콘에 부딪히면 느려지고, 자동차에 부딪히면 튕겨 나가요", SCREEN_WIDTH / 2, 378);
-  ctx.fillText("M 음소거 · 소리는 키를 누른 뒤부터 나요", SCREEN_WIDTH / 2, 406);
+  ctx.fillText("Esc 일시 정지 · M 음소거 · 소리는 키를 누른 뒤부터 나요", SCREEN_WIDTH / 2, 406);
 
   // 시작 안내: 0.5초 켜지고 0.4초 꺼지며 깜빡인다
   if (Date.now() % 900 < 500) {
@@ -1656,9 +1869,9 @@ function drawTrackSelect() {
   ctx.font = "bold 40px sans-serif";
   ctx.fillText("트랙 선택", SCREEN_WIDTH / 2, 70);
 
-  const cardWidth = 220;
+  const cardWidth = 175;
   const cardHeight = 330;
-  const gap = 25;
+  const gap = 14;
   const left = (SCREEN_WIDTH - (cardWidth * TRACKS.length + gap * (TRACKS.length - 1))) / 2;
   for (let i = 0; i < TRACKS.length; i++) {
     const track = TRACKS[i];
@@ -1682,17 +1895,28 @@ function drawTrackSelect() {
     drawTrackPreview(ctx, track.points, x + 20, y + 75, cardWidth - 40, 160, "#ffffff");
     // 제한 시간과 최고 점수
     ctx.fillStyle = "#cccccc";
-    ctx.font = "15px sans-serif";
-    ctx.fillText("제한 시간 " + track.timeLimit + "초 · 차 " + track.carCount + "대", x + cardWidth / 2, y + 265);
+    ctx.font = "13px sans-serif";
     ctx.fillStyle = "#ffd84d";
-    ctx.font = "bold 16px sans-serif";
-    const best = loadBest(i);
-    ctx.fillText(best > 0 ? "최고 점수 " + best : "기록 없음", x + cardWidth / 2, y + 295);
+    if (track.training) {
+      ctx.fillStyle = "#cccccc";
+      ctx.fillText("장애물 없음 · 계속 돌기", x + cardWidth / 2, y + 265);
+      ctx.fillStyle = "#ffd84d";
+      ctx.font = "bold 15px sans-serif";
+      const bestLap = loadBestLap(i);
+      ctx.fillText(bestLap > 0 ? "최고 랩 " + bestLap.toFixed(2) + "초" : "기록 없음", x + cardWidth / 2, y + 295);
+    } else {
+      ctx.fillStyle = "#cccccc";
+      ctx.fillText("제한 시간 " + track.timeLimit + "초 · 차 " + track.carCount + "대", x + cardWidth / 2, y + 265);
+      ctx.fillStyle = "#ffd84d";
+      ctx.font = "bold 15px sans-serif";
+      const best = loadBest(i);
+      ctx.fillText(best > 0 ? "최고 점수 " + best : "기록 없음", x + cardWidth / 2, y + 295);
+    }
   }
 
   ctx.fillStyle = "#ffffff";
   ctx.font = "bold 18px sans-serif";
-  ctx.fillText("← → 로 고르고  Enter 로 출발", SCREEN_WIDTH / 2, 500);
+  ctx.fillText("← → 로 고르고  Enter 로 출발  ·  Esc 처음 화면", SCREEN_WIDTH / 2, 500);
   ctx.fillStyle = "#aaaaaa";
   ctx.font = "15px sans-serif";
   ctx.fillText("조작: ↑↓ 앞뒤 · ←→ 핸들 · Shift 드리프트 · Ctrl 부스터", SCREEN_WIDTH / 2, 535);
@@ -1802,6 +2026,7 @@ function placeScenery() {
   // 학생: STUDENT_GAP마다 한 명씩, 왼쪽·오른쪽 인도를 번갈아. 출발 근처와 고가도로 위는 비워 둔다
   let side = -1;
   for (let s = 900; s < TRACK_LENGTH - 400; s += STUDENT_GAP) {
+    if (TRACK.training) break;   // 연습 서킷에는 학생이 없다
     if (pointAt(s).bridge || pointAt(s + STUDENT_WALK_RANGE).bridge) continue;
     const speed = 0.5 + Math.random() * 0.4;                 // 0.5 ~ 0.9
     students.push({
@@ -1858,6 +2083,7 @@ function isStraightGround(s, halfLength) {
 // CROSSWALK_GAP마다, 곧은 땅 위 길이 나올 때까지 조금씩 앞으로 가며 찾는다
 function findCrosswalks() {
   const list = [];
+  if (TRACK.training) return list;   // 연습 서킷에는 횡단보도(건너는 학생)가 없다
   let s = START_LINE_S + 1400;
   while (s < TRACK_LENGTH - 700) {
     if (isStraightGround(s, 150)) {
@@ -2192,38 +2418,10 @@ function gameLoop() {
     ctx.fill();
   }
 
-  // ----- 10. 강의실 건물 (결승 지점 위) -----
-  // 화면이 돌면 맵 끝 바깥과 건물 뒤쪽도 보이므로, 건물을 바깥까지 넉넉히 칠한다
-  ctx.fillStyle = "#9c4a3a";
-  ctx.fillRect(WORLD_LEFT - VIEW_RADIUS, WORLD_TOP - VIEW_RADIUS * 2, WORLD_RIGHT - WORLD_LEFT + VIEW_RADIUS * 2, VIEW_RADIUS * 2);
-
-  // 건물 지붕 끝선: 아래쪽에 진한 띠
-  ctx.fillStyle = "#6e2f24";
-  ctx.fillRect(WORLD_LEFT - VIEW_RADIUS, WORLD_TOP - 8, WORLD_RIGHT - WORLD_LEFT + VIEW_RADIUS * 2, 8);
-
-  // 창문: 하늘색 사각형을 일정한 간격으로 (문 자리는 비운다)
-  ctx.fillStyle = "#a8dadc";
-  for (let x = WORLD_LEFT + 30; x < WORLD_RIGHT; x += 90) {
-    if (x > DOOR_X - 60 && x < DOOR_X + DOOR_WIDTH) {
-      continue;   // 문이 있는 자리에는 창문을 그리지 않는다
-    }
-    ctx.fillRect(x, WORLD_TOP - 45, 50, 26);
+  // ----- 10~11. 강의실 건물과 문 (결승 지점 위). 연습 서킷에는 없다 -----
+  if (!TRACK.training) {
+    drawClassroom();
   }
-
-  // ----- 11. 강의실 문 (도착 지점) -----
-  // [새로 시도] 그라데이션: 위는 진한 노랑, 아래는 밝은 노랑
-  const doorGradient = ctx.createLinearGradient(0, DOOR_Y, 0, DOOR_Y + DOOR_HEIGHT);
-  doorGradient.addColorStop(0, "#e6b800");
-  doorGradient.addColorStop(1, "#ffe066");
-  ctx.fillStyle = doorGradient;
-  ctx.fillRect(DOOR_X, DOOR_Y, DOOR_WIDTH, DOOR_HEIGHT);
-
-  // 문 위에 "강의실" 글자
-  ctx.fillStyle = "#333333";
-  ctx.font = "bold 20px sans-serif";
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  ctx.fillText("강의실", DOOR_X + DOOR_WIDTH / 2, DOOR_Y + DOOR_HEIGHT / 2);
 
   // ----- 구름 그림자 (땅 위 모든 것 위에, 글자·게이지 아래에) -----
   // 타원 3개를 겹쳐서 뭉게구름 모양을 만든다
@@ -2304,7 +2502,7 @@ function gameLoop() {
 
   // 10초 이하로 남으면 글자를 빨갛게 하고, 1초가 줄 때마다 크게 튀었다가 작아진다
   let timeFontSize = 24;
-  if (timeLeft <= 10) {
+  if (timeLeft <= 10 && !TRACK.training) {
     ctx.fillStyle = "#ff4d4d";
     if (timeLeft > 0) {
       // 마지막으로 1초가 줄어든 뒤 지난 비율 (0 → 1). 막 줄었을 때 가장 크다
@@ -2317,7 +2515,15 @@ function gameLoop() {
   ctx.font = "bold " + timeFontSize + "px sans-serif";
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  ctx.fillText("남은 시간 " + timeLeft + "초", 400, 28);
+  if (TRACK.training) {
+    // 연습 서킷: 몇 번째 바퀴인지와 지금 바퀴 시간
+    const lapSeconds = gameState === "playing" ? (Date.now() - lapStartTime) / 1000 : 0;
+    ctx.fillStyle = "#ffffff";
+    ctx.font = "bold 22px sans-serif";
+    ctx.fillText("랩 " + (lapsDone + 1) + " · " + lapSeconds.toFixed(1) + "초", 400, 28);
+  } else {
+    ctx.fillText("남은 시간 " + timeLeft + "초", 400, 28);
+  }
 
   // ----- 13. 부스터 게이지 (화면 아래 가운데) -----
   // 게이지 뒤 반투명 검은 띠
@@ -2350,16 +2556,25 @@ function gameLoop() {
   ctx.font = "bold 18px sans-serif";
   ctx.textAlign = "left";
   ctx.textBaseline = "middle";
-  if (gameState === "playing" || gameState === "countdown") {
-    ctx.fillText("점수: " + Math.floor(remainingMs / 10), 20, 28);
+  if (TRACK.training) {
+    // 연습 서킷: 지난 바퀴 기록과 최고 랩
+    ctx.fillText(lastLapSeconds > 0 ? "지난 랩: " + lastLapSeconds.toFixed(2) + "초" : "지난 랩: -", 20, 28);
+    const bestLap = loadBestLap(TRACK_INDEX);
+    ctx.fillStyle = "#ffd84d";
+    ctx.font = "13px sans-serif";
+    ctx.fillText(bestLap > 0 ? "최고 랩: " + bestLap.toFixed(2) + "초" : "최고 랩: 기록 없음", 20, 51);
   } else {
-    ctx.fillText("점수: " + score, 20, 28);
+    if (gameState === "playing" || gameState === "countdown") {
+      ctx.fillText("점수: " + Math.floor(remainingMs / 10), 20, 28);
+    } else {
+      ctx.fillText("점수: " + score, 20, 28);
+    }
+    // 그 아래 작게: 이 트랙 최고 점수 (8장: 플레이 중에도 목표가 보이게)
+    const bestScore = loadBest(TRACK_INDEX);
+    ctx.fillStyle = "#ffd84d";
+    ctx.font = "13px sans-serif";
+    ctx.fillText(bestScore > 0 ? "최고 점수: " + bestScore : "최고 점수: 기록 없음", 20, 51);
   }
-  // 그 아래 작게: 이 트랙 최고 점수 (8장: 플레이 중에도 목표가 보이게)
-  const bestScore = loadBest(TRACK_INDEX);
-  ctx.fillStyle = "#ffd84d";
-  ctx.font = "13px sans-serif";
-  ctx.fillText(bestScore > 0 ? "최고 점수: " + bestScore : "최고 점수: 기록 없음", 20, 51);
 
   // ----- 15. 결과 화면: 도착(성공) 또는 게임 오버(시간 초과) -----
   if (gameState === "finished") {
@@ -2438,6 +2653,8 @@ function gameLoop() {
     drawStartScreen();
   } else if (gameState === "select") {
     drawTrackSelect();
+  } else if (gameState === "paused") {
+    drawPauseMenu();
   }
 
   // ----- 20. 소리 표시 (화면 왼쪽 아래, 모든 화면에서) -----
