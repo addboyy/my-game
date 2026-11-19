@@ -24,7 +24,8 @@ const VIEW_RADIUS = 650 / CAMERA_ZOOM;      // 화면이 돌아가도 보일 수
 let cameraAngle = 0;                        // 카메라가 바라보는 방향 (0 = 맵 위쪽)
 
 // ===== 트랙 목록 (난이도 3단계) =====
-// 트랙마다: 이름, 난이도, 제한 시간, 자동차 수, 콘 수, 꼭짓점(points)
+// 트랙마다: 이름, 난이도, 제한 시간, 자동차 수, 콘 수, 자동차 속도 곡선(처음 배율·10초마다 늘어나는 양·상한), 꼭짓점(points)
+// 제한 시간은 "최고 속도로 직진만 했을 때 걸리는 시간"의 몇 배인지로 정했다 (쉬움 약 1.6배 · 보통 1.25배 · 어려움 1.18배)
 // 꼭짓점은 출발부터 강의실(결승)까지 순서대로 직선으로 잇고, 꼭짓점마다 모서리를 반지름 CORNER_RADIUS인 원호로 둥글게 깎는다
 // bridge: true인 점에서 다음 점까지의 직선은 고가도로다 (다른 길 위를 지나간다)
 // 결승(마지막 점)이 맨 위에 있어야 한다 (그 위는 강의실 건물). 나란한 길끼리는 700 이상 떨어뜨린다
@@ -33,9 +34,12 @@ const TRACKS = [
     name: "캠퍼스 산책로",
     level: "쉬움",
     levelColor: "#7CFC00",
-    timeLimit: 30,
+    timeLimit: 16,        // 직진 최단 9.8초
     carCount: 2,
     coneCount: 8,
+    carSpeedStart: 0.8,
+    carSpeedStep: 0.1,
+    carSpeedMax: 1.0,
     points: [
       { x: 0, y: 400 },        // 출발
       { x: 0, y: -1600 },      // 직선 → 오른쪽
@@ -50,9 +54,12 @@ const TRACKS = [
     name: "고가의 질주",
     level: "보통",
     levelColor: "#ffd84d",
-    timeLimit: 50,
-    carCount: 4,
+    timeLimit: 42,        // 직진 최단 33.2초 (6주차 내 기록 36.87초)
+    carCount: 5,
     coneCount: 25,
+    carSpeedStart: 0.9,
+    carSpeedStep: 0.1,
+    carSpeedMax: 1.3,
     points: [
       { x: 0, y: 400 },                      // 출발 (출발선 뒤 여유 공간)
       { x: 0, y: -2500 },                    // 첫 긴 직선 → 오른쪽으로 직각
@@ -73,9 +80,12 @@ const TRACKS = [
     name: "지그재그 캠퍼스",
     level: "어려움",
     levelColor: "#ff4d4d",
-    timeLimit: 45,
-    carCount: 6,
-    coneCount: 40,
+    timeLimit: 33,        // 직진 최단 28.0초: 부스터를 써야 깰 수 있다
+    carCount: 9,
+    coneCount: 50,
+    carSpeedStart: 1.0,
+    carSpeedStep: 0.15,
+    carSpeedMax: 1.6,
     points: [
       { x: 0, y: 400 },        // 출발
       { x: 0, y: -2400 },      // 위로 → 헤어핀
@@ -293,9 +303,10 @@ const GAUGE_WIDTH = 200;
 const GAUGE_HEIGHT = 14;
 // ===== 난이도 곡선 (8장): 출발하고 시간이 지날수록 자동차가 빨라진다 =====
 // 프레임 수가 아니라 실제로 흐른 시간(Date.now() - startTime)으로 잰다 → 120Hz 기기에서도 똑같이 어려워진다
-const CAR_SPEED_START = 0.8;      // 처음 자동차 속도 배율 (원래 속도의 80%: 처음 10초는 쉽게)
-const CAR_SPEED_STEP = 0.1;       // 한 번 어려워질 때마다 늘어나는 배율
-const CAR_SPEED_MAX = 1.3;        // 상한: 이보다 빨라지지 않는다 (원래 속도의 130%)
+// 숫자는 트랙마다 다르다 (트랙 목록의 carSpeedStart · carSpeedStep · carSpeedMax)
+const CAR_SPEED_START = TRACK.carSpeedStart;   // 처음 자동차 속도 배율 (쉬움 0.8 · 보통 0.9 · 어려움 1.0)
+const CAR_SPEED_STEP = TRACK.carSpeedStep;     // 한 번 어려워질 때마다 늘어나는 배율
+const CAR_SPEED_MAX = TRACK.carSpeedMax;       // 상한: 이보다 빨라지지 않는다 (쉬움 1.0 · 보통 1.3 · 어려움 1.6)
 const LEVEL_UP_SECONDS = 10;      // 몇 초마다 어려워지나
 let carSpeedRate = CAR_SPEED_START;    // 지금 자동차 속도 배율
 let nextLevelUp = LEVEL_UP_SECONDS;    // 다음에 어려워질 시점 (출발 후 초). 한 번만 올리려고 다음 시점을 미뤄 둔다
