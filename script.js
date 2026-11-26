@@ -33,7 +33,7 @@ const TRACKS = [
     levelColor: "#7CFC00",
     timeLimit: 16,        // 직진 최단 9.8초
     carCount: 2,
-    coneCount: 8,
+    coneCount: 6,         // 9장: 플레이테스트 "장애물이 너무 많다" → 20% 줄임 (8 → 6)
     carSpeedStart: 0.8,
     carSpeedStep: 0.1,
     carSpeedMax: 1.0,
@@ -52,8 +52,8 @@ const TRACKS = [
     level: "보통",
     levelColor: "#ffd84d",
     timeLimit: 42,        // 직진 최단 33.2초 (6주차 내 기록 36.87초)
-    carCount: 5,
-    coneCount: 25,
+    carCount: 4,          // 9장: 20% 줄임 (5 → 4)
+    coneCount: 20,        // 9장: 20% 줄임 (25 → 20)
     carSpeedStart: 0.9,
     carSpeedStep: 0.1,
     carSpeedMax: 1.3,
@@ -78,8 +78,8 @@ const TRACKS = [
     level: "어려움",
     levelColor: "#ff4d4d",
     timeLimit: 33,        // 직진 최단 28.0초: 부스터를 써야 깰 수 있다
-    carCount: 9,
-    coneCount: 50,
+    carCount: 7,          // 9장: 20% 줄임 (9 → 7)
+    coneCount: 40,        // 9장: 20% 줄임 (50 → 40)
     carSpeedStart: 1.0,
     carSpeedStep: 0.15,
     carSpeedMax: 1.6,
@@ -283,7 +283,7 @@ const STUDENT_HEIGHT = 36;
 // 학생마다 자기 구간(minS ~ maxS, 트랙 거리)만 오가다가 끝에 닿으면 돌아선다
 // side는 어느 쪽 인도인지 (-1 = 진행 방향 왼쪽, 1 = 오른쪽)
 let students = [];
-const STUDENT_GAP = 700;      // 학생을 놓을 트랙 거리 간격
+const STUDENT_GAP = 875;      // 학생을 놓을 트랙 거리 간격 (9장: 장애물 20% 줄이기로 700 → 875, 학생 수가 0.8배)
 const STUDENT_WALK_RANGE = 260;  // 한 학생이 오가는 구간 길이
 const STUDENT_WOBBLE = 0.12;  // 걸을 때 몸이 좌우로 흔들리는 각도 (0.12 ≈ 7도)
 
@@ -308,7 +308,7 @@ let cones = [];
 
 // 횡단보도와 길을 건너는 학생: 트랙 곳곳의 직선 구간에 횡단보도를 만들고, 학생이 차도를 가로질러 오간다
 // 건너는 학생 한 명은 { s: 횡단보도 위치, offset: 길 가운데에서 옆으로 떨어진 거리, speed: 건너는 속도 }
-const CROSSWALK_GAP = 3000;                              // 횡단보도 사이 간격 (트랙 거리)
+const CROSSWALK_GAP = 3750;                              // 횡단보도 사이 간격 (트랙 거리). 9장: 장애물 20% 줄이기로 3000 → 3750
 const CROSSERS_PER_CROSSWALK = 2;                        // 횡단보도 하나에 건너는 학생 수
 const CROSS_RANGE = ROAD_HALF + SIDEWALK_WIDTH / 2;      // 한쪽 인도 가운데 ~ 반대편 인도 가운데
 let crosswalks = [];
