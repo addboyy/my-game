@@ -1,15 +1,415 @@
-/* 페이지 전체: 어두운 회색 배경 */
+/* 페이지 전체: 어두운 회색 배경, 게임 화면을 가운데에 */
 body {
   margin: 0;
   min-height: 100vh;
+  overflow: hidden;   /* 9장: 휴대폰에서 화면이 옆으로 밀리거나 스크롤되지 않게 (게임 화면은 script.js가 창에 맞게 줄인다) */
   background: #2b2b2b;
-  /* canvas를 화면 가운데에 놓는다 */
   display: flex;
   align-items: center;
   justify-content: center;
+  font-family: sans-serif;
 }
 
-/* 게임 도화지: 얇은 흰 테두리 */
-#game {
+/* 게임 화면: 3D 캔버스 위에 글자들을 겹쳐 놓는 무대 */
+#stage {
+  position: relative;
+  width: 800px;
+  height: 600px;
   border: 1px solid #ffffff;
+  overflow: hidden;
+  user-select: none;
+}
+#game {
+  display: block;
+}
+
+/* 반투명 검은 띠 */
+.panel {
+  position: absolute;
+  background: rgba(0, 0, 0, 0.5);
+  color: #ffffff;
+  font-weight: bold;
+}
+#score {
+  left: 10px;
+  top: 10px;
+  padding: 7px 12px;
+  font-size: 18px;
+}
+#time {
+  left: 50%;
+  top: 8px;
+  transform: translateX(-50%);
+  width: 210px;
+  height: 40px;
+  line-height: 40px;
+  text-align: center;
+  font-size: 24px;
+}
+#minimap {
+  right: 10px;
+  top: 10px;
+}
+/* 디버그 표시 (D 키): 점수 칸 아래 */
+#debug {
+  display: none;
+  position: absolute;
+  left: 10px;
+  top: 52px;
+  margin: 0;
+  padding: 5px 8px;
+  background: rgba(0, 0, 0, 0.6);
+  color: #7CFC00;
+  font: 12px/17px monospace;
+}
+#gauge {
+  left: 50%;
+  bottom: 8px;
+  transform: translateX(-50%);
+  width: 200px;
+  padding: 4px 10px 8px;
+  text-align: center;
+  font-size: 14px;
+  font-weight: normal;
+}
+#gauge .bar {
+  margin-top: 4px;
+  height: 12px;
+  background: #333333;
+  border: 1px solid #ffffff;
+}
+#gauge .fill {
+  width: 0%;
+  height: 100%;
+  background: #ff9f1c;
+}
+/* 게이지가 가득 차면 반짝인다 */
+#gauge.ready .fill {
+  background: #ffd84d;
+  animation: blink 0.5s infinite alternate;
+}
+#gauge.ready span {
+  color: #ffd84d;
+  font-weight: bold;
+}
+@keyframes blink {
+  from { opacity: 1; }
+  to { opacity: 0.4; }
+}
+
+/* 번아웃 중 모인 힘 */
+#burnout {
+  position: absolute;
+  left: 50%;
+  bottom: 70px;
+  transform: translateX(-50%);
+  width: 220px;
+  padding: 6px 10px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: bold;
+  text-align: center;
+  display: none;
+}
+#burnout .bar {
+  margin-top: 4px;
+  height: 10px;
+  background: #333333;
+  border: 1px solid #ffffff;
+}
+#burnout .fill {
+  width: 0%;
+  height: 100%;
+  background: #ff5c5c;
+}
+
+/* 부스터 / 출발 대시 글자 */
+#boost-text {
+  position: absolute;
+  left: 50%;
+  top: 120px;
+  transform: translateX(-50%);
+  color: #ff9f1c;
+  font-size: 40px;
+  font-weight: bold;
+  font-style: italic;
+  text-shadow: -3px -3px 0 #000, 3px -3px 0 #000, -3px 3px 0 #000, 3px 3px 0 #000;
+  display: none;
+}
+
+/* 출발 카운트다운: 3, 2, 1, GO! */
+#countdown {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 170px;
+  text-align: center;
+  display: none;
+  pointer-events: none;
+}
+#count-num {
+  font-size: 110px;
+  font-weight: bold;
+  text-shadow: -4px -4px 0 #000, 4px -4px 0 #000, -4px 4px 0 #000, 4px 4px 0 #000;
+}
+#count-hint {
+  margin-top: 10px;
+  color: #ffffff;
+  font-size: 18px;
+  font-weight: bold;
+  text-shadow: -2px -2px 0 #000, 2px -2px 0 #000, -2px 2px 0 #000, 2px 2px 0 #000;
+}
+
+/* 의자 위에 뜨는 글자: DRIFT!, 슬로우!, 쾅! 스턴 */
+#drift, #hit {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  font-weight: bold;
+  text-shadow: -2px -2px 0 #000, 2px -2px 0 #000, -2px 2px 0 #000, 2px 2px 0 #000;
+  display: none;
+}
+#drift {
+  top: 330px;
+  color: #ffd84d;
+  font-style: italic;
+  font-size: 18px;
+}
+#hit {
+  top: 300px;
+  font-size: 24px;
+}
+
+/* 역주행 경고 */
+#wrong-way {
+  position: absolute;
+  left: 50%;
+  top: 70px;
+  transform: translateX(-50%);
+  width: 300px;
+  padding: 8px 0;
+  background: rgba(200, 0, 0, 0.75);
+  border: 3px solid #ffffff;
+  color: #ffffff;
+  text-align: center;
+  font-size: 26px;
+  font-weight: bold;
+  display: none;
+}
+#wrong-way small {
+  display: block;
+  font-size: 13px;
+  font-weight: normal;
+}
+
+/* 자동차에 부딪혔을 때 빨간 번쩍임 */
+#flash {
+  position: absolute;
+  inset: 0;
+  background: #ff0000;
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* 결과 화면: 도착 / GAME OVER */
+#result {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.65);
+  color: #ffffff;
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+#result-title {
+  font-size: 56px;
+  font-weight: bold;
+  margin-bottom: 30px;
+}
+#result-lines {
+  font-size: 26px;
+  font-weight: bold;
+  line-height: 1.6;
+}
+#result .hint {
+  margin-top: 40px;
+  font-size: 18px;
+  color: #cccccc;
+}
+
+/* 트랙 선택 화면 */
+#select {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.75);
+  color: #ffffff;
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+#select .title {
+  font-size: 40px;
+  font-weight: bold;
+  margin-bottom: 20px;
+}
+#cards {
+  display: flex;
+  gap: 25px;
+}
+#select .card {
+  width: 220px;
+  padding: 14px 0;
+  background: rgba(30, 30, 30, 0.9);
+  border: 2px solid #666666;
+  text-align: center;
+}
+#select .card.selected {
+  background: rgba(60, 60, 60, 0.95);
+  border: 4px solid #ffd84d;
+}
+#select .name {
+  font-size: 22px;
+  font-weight: bold;
+}
+#select .level {
+  font-size: 18px;
+  font-weight: bold;
+  margin: 4px 0 8px;
+}
+#select .info {
+  color: #cccccc;
+  font-size: 15px;
+  margin-top: 8px;
+}
+#select .best {
+  color: #ffd84d;
+  font-size: 16px;
+  font-weight: bold;
+  margin-top: 8px;
+}
+#select .hint {
+  margin-top: 24px;
+  font-size: 18px;
+  font-weight: bold;
+}
+#select .keys {
+  margin-top: 10px;
+  color: #aaaaaa;
+  font-size: 15px;
+}
+
+/* ===== 8장 ===== */
+
+/* 점수 칸 아래 작게: 최고 점수 / 최고 랩 */
+#score small {
+  display: block;
+  margin-top: 3px;
+  color: #ffd84d;
+  font-size: 13px;
+  font-weight: normal;
+}
+
+/* 트랙 카드 4장이 들어가게 (연습 서킷 추가) */
+#cards {
+  gap: 12px;
+}
+#select .card {
+  width: 172px;
+}
+#select .card canvas {
+  width: 150px;
+  height: 133px;
+}
+#select .info {
+  font-size: 13px;
+}
+
+/* 소리 표시: 화면 왼쪽 아래 */
+#sound {
+  left: 10px;
+  bottom: 10px;
+  padding: 4px 10px;
+  font-size: 13px;
+  font-weight: normal;
+}
+#sound.muted {
+  color: #ff8a8a;
+}
+
+/* 시작 화면 */
+#start, #pause {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  color: #ffffff;
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+#start .title {
+  color: #ffd84d;
+  font-size: 72px;
+  font-weight: bold;
+  font-style: italic;
+  text-shadow: -4px -4px 0 #000, 4px -4px 0 #000, -4px 4px 0 #000, 4px 4px 0 #000;
+  margin-bottom: 16px;
+}
+#start .goal {
+  margin: 24px 0 18px;
+  font-size: 22px;
+  font-weight: bold;
+}
+#start .keys {
+  color: #cccccc;
+  font-size: 17px;
+  line-height: 1.65;
+}
+#start .press {
+  margin-top: 50px;
+  color: #7CFC00;
+  font-size: 24px;
+  font-weight: bold;
+  animation: blink 0.9s step-end infinite;
+}
+@keyframes blink {
+  50% { opacity: 0; }
+}
+
+/* 일시 정지 메뉴 */
+#pause .title {
+  font-size: 44px;
+  font-weight: bold;
+  margin-bottom: 30px;
+}
+#pause .option {
+  width: 300px;
+  margin: 6px 0;
+  padding: 11px 0;
+  background: rgba(255, 255, 255, 0.06);
+  border: 3px solid transparent;
+  font-size: 22px;
+  font-weight: bold;
+}
+#pause .option.selected {
+  background: rgba(255, 216, 77, 0.2);
+  border-color: #ffd84d;
+  color: #ffd84d;
+}
+#pause .hint {
+  margin-top: 30px;
+  color: #aaaaaa;
+  font-size: 15px;
+}
+
+/* 시작 화면 맨 아래: PC 안내 (9장, 모바일) */
+#start .pc-only {
+  margin-top: 14px;
+  color: #999999;
+  font-size: 13px;
 }

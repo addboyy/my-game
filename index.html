@@ -3,12 +3,59 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Chair Drift</title>
+  <title>Chair Drift 3D</title>
   <link rel="icon" href="images/chair.svg">
   <link rel="stylesheet" href="style.css">
+  <!-- Three.js: 3D 그리기를 대신해 주는 라이브러리 (THREE 라는 이름으로 쓴다) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
   <script src="script.js" defer></script>
 </head>
 <body>
-  <canvas id="game" width="800" height="600"></canvas>
+  <div id="stage">
+    <canvas id="game" width="800" height="600"></canvas>
+
+    <!-- 화면 위 글자들 (3D 그림 위에 겹쳐 보인다) -->
+    <div id="score" class="panel">점수: 0</div>
+    <div id="time" class="panel">남은 시간 0초</div>
+    <canvas id="minimap" class="panel" width="160" height="160"></canvas>
+    <pre id="debug"></pre>
+    <div id="gauge" class="panel"><span>부스터</span><div class="bar"><div class="fill"></div></div></div>
+    <div id="burnout">번아웃! ↓만 떼면 출발<div class="bar"><div class="fill"></div></div></div>
+    <div id="boost-text"></div>
+    <div id="countdown"><div id="count-num"></div><div id="count-hint">GO! 순간에 ↑를 누르면 출발 부스터</div></div>
+    <div id="drift">DRIFT!</div>
+    <div id="hit"></div>
+    <div id="wrong-way">⚠ 역주행 중!<small>강의실은 반대 방향이에요</small></div>
+    <div id="flash"></div>
+    <div id="result">
+      <div id="result-title"></div>
+      <div id="result-lines"></div>
+      <div class="hint">R: 다시 달리기 · T: 트랙 선택</div>
+    </div>
+    <div id="sound" class="panel"></div>
+    <div id="select">
+      <div class="title">트랙 선택</div>
+      <div id="cards"></div>
+      <div class="hint">← → 로 고르고 Enter 로 출발 · Esc 처음 화면</div>
+      <div class="keys">조작: ↑↓ 앞뒤 · ←→ 핸들 · Shift 드리프트 · Ctrl 부스터</div>
+    </div>
+    <!-- 시작 화면 (8장): 아무 키나 누르면 트랙 선택으로 -->
+    <div id="start">
+      <div class="title">Chair Drift</div>
+      <img src="images/chair.svg" alt="" width="64" height="64">
+      <div class="goal">바퀴 달린 의자를 타고 제한 시간 안에 강의실까지!</div>
+      <div class="keys">↑↓ 앞뒤 · ←→ 핸들 · Shift 드리프트 · Ctrl 부스터</div>
+      <div class="keys">학생·콘에 부딪히면 느려지고, 자동차에 부딪히면 튕겨 나가요</div>
+      <div class="keys">Esc 일시 정지 · M 음소거 · 소리는 키를 누른 뒤부터 나요</div>
+      <div class="press">아무 키나 눌러 시작</div>
+      <div class="pc-only">PC에서 키보드로 플레이해 주세요 (휴대폰 터치 조작은 지원하지 않아요)</div>
+    </div>
+    <!-- 일시 정지 메뉴 (8장, Esc) -->
+    <div id="pause">
+      <div class="title">일시 정지</div>
+      <div id="pause-options"></div>
+      <div class="hint">↑↓ 고르기 · Enter 확인 · Esc 계속</div>
+    </div>
+  </div>
 </body>
 </html>

@@ -1,13 +1,6 @@
-// ============================================================
-// ① 준비: 도화지(canvas)와 붓(ctx)
-// ============================================================
-
-const canvas = document.getElementById("game");  // 이름이 "game"인 도화지를 찾는다
-const ctx = canvas.getContext("2d");             // 그 도화지에 그릴 "붓"을 가져온다
-
-// ============================================================
-// ② 상태 변수: 설정 숫자(const)와 게임 중에 바뀌는 값(let)
-// ============================================================
+// Chair Drift 3D — 2D 버전(my-game)의 게임 규칙을 그대로 쓰고, 화면만 Three.js로 3D로 그린다
+// 게임 규칙(트랙, 조작, 드리프트, 충돌, 시간, 점수)은 my-game/script.js에서 그대로 가져온 코드다
+// 3D 좌표: 2D 맵의 (x, y) → 3D의 (x, 높이, z = y)
 
 // ===== 좌표와 크기 (여기 숫자만 바꾸면 그림이 바뀐다) =====
 // 화면 크기: 가로 800, 세로 600. (0, 0)은 왼쪽 위, y가 커지면 아래로 간다.
@@ -252,14 +245,14 @@ const SMOKE_LIFE = 40;        // 연기가 사라지기까지 걸리는 프레�
 
 // ===== 충돌 판정 (6장) =====
 // 판정 영역(히트박스): 그림을 감싸는 사각형을 그림보다 조금 작게 잡는다 (스치기만 해도 부딪히면 억울하니까)
-const CHAIR_HITBOX = 33;      // 의자 판정 사각형 한 변 (그림은 50)
+const CHAIR_HITBOX = 22;      // 의자 판정 사각형 한 변 (3D 의자 폭 약 21 = 65cm)
 const CAR_HITBOX_SHRINK = 6;  // 자동차 판정은 그림(40×70)보다 가로·세로 6씩 작게
-const STUDENT_HITBOX = 30;    // 학생 판정 사각형 한 변 (그림은 52×36)
-const CONE_HITBOX = 20;       // 콘 판정 사각형 한 변 (그림은 24)
+const STUDENT_HITBOX = 18;    // 학생 판정 사각형 한 변 (어깨 폭 약 16 = 45cm)
+const CONE_HITBOX = 12;       // 콘 판정 사각형 한 변 (받침 13 = 40cm)
 
-// ===== 디버그 표시 (7장): 화면 왼쪽에 지금 상태(숫자)를 띄운다. D 키로 켜고 끈다 =====
-let showDebug = false;        // true면 디버그 글씨를 띄운다 (제출할 때는 false)
-let showHitbox = showDebug;   // true면 판정 영역을 빨간 테두리로 그린다. showDebug와 같이 켜지고 꺼진다
+// ===== 디버그 표시 (2D 7장과 같다): 화면 왼쪽에 지금 상태(숫자)를 띄운다. D 키로 켜고 끈다 =====
+let showDebug = false;        // true면 디버그 글씨를 띄운다
+let showHitbox = showDebug;   // 2D와 맞춰 showDebug와 같이 켜지고 꺼진다 (3D에서는 판정 테두리를 아직 그리지 않는다)
 
 // 부딪혔을 때 효과 (기획서: 학생 = 슬로우, 자동차 = 튕겨 나가고 잠시 스턴). 시간은 전부 프레임 수 (60 ≈ 1초)
 const SLOW_FRAMES = 60;       // 학생·콘에 부딪히면 이만큼 느려진다
@@ -295,8 +288,8 @@ const STUDENT_WALK_RANGE = 260;  // 한 학생이 오가는 구간 길이
 const STUDENT_WOBBLE = 0.12;  // 걸을 때 몸이 좌우로 흔들리는 각도 (0.12 ≈ 7도)
 
 // 자동차: 40×70, 트랙을 따라 자기 차선으로 달린다. 위치는 트랙 거리(s)로 기억한다
-const CAR_WIDTH = 40;
-const CAR_HEIGHT = 70;
+const CAR_WIDTH = 58;         // 자동차 폭 (1.8m)
+const CAR_HEIGHT = 144;       // 자동차 길이 (4.5m). 2D에서 위에서 본 그림의 세로라서 이름이 HEIGHT
 // 자동차들: 배열 하나에 여러 대를 담는다. 한 대는 { s: 트랙 거리, speed: 속도, lane: 차선 }
 // speed가 양수면 의자와 같은 방향(오른쪽 차선, lane 1), 음수면 마주 오는 차(반대편 차선, lane -1)
 // CAR_COUNT 숫자만 바꾸면 코드를 고치지 않아도 자동차 수가 바뀐다
@@ -343,7 +336,7 @@ let remainingMs = TIME_LIMIT * 1000;   // 남은 시간 (밀리초)
 let timeLeft = TIME_LIMIT;        // 화면에 보여 줄 남은 시간 (정수 초)
 
 // ===== 게임 상태와 점수 (6장) =====
-// "start" = 시작 화면 (8장) / "select" = 트랙 선택 화면 / "countdown" = 출발 전 3, 2, 1 / "playing" = 달리는 중
+// "start" = 시작 화면 (8장) / "paused" = Esc 일시 정지 (8장) / "select" = 트랙 선택 화면 / "countdown" = 출발 전 3, 2, 1 / "playing" = 달리는 중
 // "finished" = 강의실 도착 (성공) / "gameover" = 시간 초과 (결석)
 // 처음 열면 시작 화면. 트랙을 골라 페이지를 다시 불러온 경우(?track=)에는 바로 카운트다운
 let gameState = STARTED_FROM_MENU ? "countdown" : "start";
@@ -372,6 +365,118 @@ const GAUGE_X = 300;
 const GAUGE_Y = 570;
 const GAUGE_WIDTH = 200;
 const GAUGE_HEIGHT = 14;
+const GAUGE_FILL = 0.4;   // 0 = 비어 있음, 1 = 가득 참
+
+
+// ===== 맵 꾸미기와 장애물 배치 (2D 버전과 같다) =====
+placeScenery();
+crosswalks = findCrosswalks();
+createCars();
+createCones();
+createCrossers();
+
+// ===== 키보드 입력 (2D 버전과 같다) =====
+document.addEventListener("keydown", function (e) {
+  // 방향키·스페이스바로 페이지가 스크롤되지 않게 막는다
+  if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", " ", "Control", "Enter"].includes(e.key)) {
+    e.preventDefault();
+  }
+  // Esc: 달리는 중(카운트다운 포함)이면 일시 정지 메뉴, 메뉴에서는 계속하기, 트랙 선택 화면에서는 시작 화면으로
+  if (e.key === "Escape") {
+    if (gameState === "playing" || gameState === "countdown") pauseGame();
+    else if (gameState === "paused") resumeGame();
+    else if (gameState === "select") gameState = "start";
+    return;
+  }
+  // 일시 정지 메뉴: ↑↓로 고르고 Enter. 메뉴 중에는 키가 게임에 들어가지 않게 여기서 끝낸다
+  if (gameState === "paused") {
+    if (e.key === "ArrowUp") pauseIndex = (pauseIndex + PAUSE_OPTIONS.length - 1) % PAUSE_OPTIONS.length;
+    if (e.key === "ArrowDown") pauseIndex = (pauseIndex + 1) % PAUSE_OPTIONS.length;
+    if (e.key === "Enter") choosePauseOption();
+    return;
+  }
+
+  // ↑를 새로 누른 순간을 기록한다 (출발 부스터 판정용). 꾹 누르고 있을 때 반복해서 들어오는 건 무시
+  if (e.key === "ArrowUp" && !keys["ArrowUp"]) {
+    upPressTime = Date.now();
+  }
+  // R 키: 도착했거나 게임 오버일 때 다시 시작 (한글 입력 상태의 "ㄱ"도 받게 e.code도 본다)
+  if ((e.key === "r" || e.key === "R" || e.code === "KeyR") && (gameState === "finished" || gameState === "gameover")) {
+    resetGame();
+  }
+
+  // 키를 누른 순간에 소리 장치를 켠다 (브라우저 소리 제한 풀기)
+  unlockAudio();
+
+  // M 키: 음소거 켜고 끄기 (한글 입력 상태의 "ㅡ"도 받게 e.code도 본다)
+  if (e.key === "m" || e.key === "M" || e.code === "KeyM") {
+    isMuted = !isMuted;
+    saveMuted(isMuted);
+  }
+
+  // 시작 화면: 아무 키나 누르면 트랙 선택으로 (이 키는 여기서 끝낸다. Enter가 트랙 선택까지 바로 넘어가지 않게)
+  if (gameState === "start") {
+    gameState = "select";
+    return;
+  }
+
+  // D 키: 디버그 표시를 켜고 끈다 (한글 입력 상태의 "ㅇ"도 받게 e.code도 본다)
+  if (e.key === "d" || e.key === "D" || e.code === "KeyD") {
+    showDebug = !showDebug;
+    showHitbox = showDebug;
+  }
+
+  // 트랙 선택 화면: ← → 로 고르고 Enter로 출발
+  if (gameState === "select") {
+    if (e.key === "ArrowLeft") menuIndex = (menuIndex + TRACKS.length - 1) % TRACKS.length;
+    if (e.key === "ArrowRight") menuIndex = (menuIndex + 1) % TRACKS.length;
+    if (e.key === "Enter") chooseTrack(menuIndex);
+  }
+  // T 키: 결과 화면에서 트랙 선택으로 (한글 입력 상태의 "ㅅ"도 받게 e.code도 본다)
+  if ((e.key === "t" || e.key === "T" || e.code === "KeyT") && (gameState === "finished" || gameState === "gameover")) {
+    menuIndex = TRACK_INDEX;
+    gameState = "select";
+  }
+  keys[e.key] = true;
+});
+document.addEventListener("keyup", function (e) {
+  keys[e.key] = false;
+});
+window.addEventListener("blur", function () {
+  for (const key in keys) {
+    keys[key] = false;
+  }
+});
+
+// 다른 탭으로 가면 브라우저가 게임 루프(requestAnimationFrame)를 멈추는데 시계(Date.now)는 계속 간다 (2D 7장과 같은 수정)
+// → 숨어 있던 시간만큼 시작 시각들을 뒤로 밀어서 시간도 멈춘 것처럼 만든다
+let hiddenAt = 0;   // 탭이 숨겨진 시각 (0 = 숨겨져 있지 않음)
+document.addEventListener("visibilitychange", function () {
+  if (document.hidden) {
+    hiddenAt = Date.now();
+  } else if (hiddenAt !== 0) {
+    // 일시 정지 중이었으면 건너뛴다 (계속할 때 멈춰 있던 시간 전체를 한꺼번에 민다)
+    if (gameState !== "paused") shiftClocks(Date.now() - hiddenAt);
+    hiddenAt = 0;
+  }
+});
+
+// ===== 3D 전용 설정 (여기 숫자를 바꾸면 3D 화면이 바뀐다) =====
+// 크기 기준: 차선 폭(130) ≈ 4m → 1m ≈ 32칸. 의자·사람·차·콘을 현실 비율로 만든다
+// 좌표 바꾸기: 2D 맵의 (x, y) → 3D의 (x, 높이, z=y). 1픽셀 = 3D 1칸
+const BRIDGE_HEIGHT = 130;       // 고가도로 높이 (약 4m, 차가 아래로 지나갈 수 있게)
+const RAMP_LENGTH = 600;         // 고가 양쪽 끝 오르막·내리막 길이
+const CURB_HEIGHT = 3;           // 인도 턱 높이
+const RAIL_HEIGHT = 20;          // 가드레일 높이
+const DECK_THICKNESS = 20;       // 고가 바닥 두께
+const CAM_DISTANCE = 170;        // 카메라가 의자 뒤로 떨어진 거리
+const CAM_HEIGHT = 85;           // 카메라 높이
+const CAM_UNDER_HEIGHT = 60;     // 고가 아래를 지날 때 카메라 높이 (고가 바닥에 부딪히지 않게)
+const CAM_LOOK_AHEAD = 200;      // 카메라가 의자보다 이만큼 앞을 바라본다
+const SKID_MAX = 2000;           // 한 번에 그릴 수 있는 스키드 마크 조각 수
+const SMOKE_MAX = 80;            // 한 번에 그릴 수 있는 연기 수
+const CHAIR_MODEL_SCALE = 1;     // 의자 3D 모델 크기 배율 (1 = 현실 비율). 바꾸면 CHAIR_HITBOX도 같이 맞춘다
+
 // ===== 난이도 곡선 (8장): 출발하고 시간이 지날수록 자동차가 빨라진다 =====
 // 프레임 수가 아니라 실제로 흐른 시간(Date.now() - startTime)으로 잰다 → 120Hz 기기에서도 똑같이 어려워진다
 // 숫자는 트랙마다 다르다 (트랙 목록의 carSpeedStart · carSpeedStep · carSpeedMax)
@@ -394,6 +499,7 @@ const DRIFT_GAUGE_RATE = 0.006;  // 최고 속도로 드리프트할 때 한 프
 const BOOST_FRAMES = 90;         // 부스터가 이어지는 프레임 수 (90 = 1.5초)
 const BOOST_SPEED_RATE = 1.6;    // 부스터 중 최고 속도 배율
 const BOOST_GRIP = 0.12;         // 부스터 중 가속 (평소 ACCEL보다 훨씬 커서 확 튀어 나간다)
+const BOOST_FOV = 75;            // 부스터 중 카메라 시야각 (넓어지면 빨라 보인다. 평소 60)
 let boostGauge = 0;              // 부스터 게이지 (0 = 빈칸, 1 = 가득)
 let boostTimer = 0;              // 남은 부스터 프레임
 
@@ -420,147 +526,971 @@ let goTime = 0;                     // GO!가 뜬 시각
 let upPressTime = 0;                // ↑를 마지막으로 새로 누른 시각 (0 = 아직 안 누름)
 let startBoostChecked = false;      // 출발 부스터 판정을 끝냈나
 
-// ===== 탭 숨김 (다른 탭에 갔다 오면 시간을 멈춘 것처럼) =====
-let hiddenAt = 0;   // 탭이 숨겨진 시각 (0 = 숨겨져 있지 않음)
-
-// ============================================================
-// ③ 이벤트: 키보드와 창(탭) 변화
-// ============================================================
-
-// ===== 키보드 입력 =====
-// 키보드는 canvas가 아니라 document(페이지 전체)에 건다. canvas는 키 입력을 받지 않는다.
-
-// 키를 누르는 순간: "눌렸다"고 적어 둔다
-document.addEventListener("keydown", function (e) {
-  // 방향키·스페이스바로 페이지가 스크롤되어 게임이 흔들리지 않게, 브라우저 기본 동작을 막는다
-  if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", " ", "Control", "Enter"].includes(e.key)) {
-    e.preventDefault();
-  }
-
-  // Esc: 달리는 중(카운트다운 포함)이면 일시 정지 메뉴, 메뉴에서는 계속하기, 트랙 선택 화면에서는 시작 화면으로
-  if (e.key === "Escape") {
-    if (gameState === "playing" || gameState === "countdown") pauseGame();
-    else if (gameState === "paused") resumeGame();
-    else if (gameState === "select") gameState = "start";
-    return;
-  }
-  // 일시 정지 메뉴: ↑↓로 고르고 Enter. 메뉴 중에는 키가 게임에 들어가지 않게 여기서 끝낸다
-  if (gameState === "paused") {
-    if (e.key === "ArrowUp") pauseIndex = (pauseIndex + PAUSE_OPTIONS.length - 1) % PAUSE_OPTIONS.length;
-    if (e.key === "ArrowDown") pauseIndex = (pauseIndex + 1) % PAUSE_OPTIONS.length;
-    if (e.key === "Enter") choosePauseOption();
-    return;
-  }
-
-  // ↑를 새로 누른 순간을 기록한다 (출발 부스터 판정용). 꾹 누르고 있을 때 반복해서 들어오는 건 무시
-  if (e.key === "ArrowUp" && !keys["ArrowUp"]) {
-    upPressTime = Date.now();
-  }
-
-  // R 키: 도착했거나 게임 오버일 때 처음부터 다시 시작
-  // 한글 입력 상태면 R 자리 키가 "ㄱ"으로 들어오므로, 키 자리 이름(e.code)도 같이 본다
-  if ((e.key === "r" || e.key === "R" || e.code === "KeyR") && (gameState === "finished" || gameState === "gameover")) {
-    resetGame();
-  }
-
-  // 키를 누른 순간에 소리 장치를 켠다 (브라우저 소리 제한 풀기)
-  unlockAudio();
-
-  // M 키: 음소거 켜고 끄기 (한글 입력 상태의 "ㅡ"도 받게 e.code도 본다)
-  if (e.key === "m" || e.key === "M" || e.code === "KeyM") {
-    isMuted = !isMuted;
-    saveMuted(isMuted);
-  }
-
-  // 시작 화면: 아무 키나 누르면 트랙 선택으로 (이 키는 여기서 끝낸다. Enter가 트랙 선택까지 바로 넘어가지 않게)
-  if (gameState === "start") {
-    gameState = "select";
-    return;
-  }
-
-  // D 키: 디버그 표시와 판정 테두리를 함께 켜고 끈다 (한글 입력 상태의 "ㅇ"도 받게 e.code도 본다)
-  if (e.key === "d" || e.key === "D" || e.code === "KeyD") {
-    showDebug = !showDebug;
-    showHitbox = showDebug;
-  }
-
-  // 트랙 선택 화면: ← → 로 고르고 Enter로 출발
-  if (gameState === "select") {
-    if (e.key === "ArrowLeft") menuIndex = (menuIndex + TRACKS.length - 1) % TRACKS.length;
-    if (e.key === "ArrowRight") menuIndex = (menuIndex + 1) % TRACKS.length;
-    if (e.key === "Enter") chooseTrack(menuIndex);
-  }
-  // T 키: 결과 화면에서 트랙 선택으로 (한글 입력 상태의 "ㅅ"도 받게 e.code도 본다)
-  if ((e.key === "t" || e.key === "T" || e.code === "KeyT") && (gameState === "finished" || gameState === "gameover")) {
-    menuIndex = TRACK_INDEX;
-    gameState = "select";
-  }
-
-  if (CONTROL_METHOD === "A") {
-    // 방식 A: 눌릴 때마다 여기서 바로 위치를 바꾼다 (비교 실험용)
-    if (e.key === "ArrowLeft") chairX = chairX - CHAIR_SPEED;
-    if (e.key === "ArrowRight") chairX = chairX + CHAIR_SPEED;
-    if (e.key === "ArrowUp") chairY = chairY - CHAIR_SPEED;
-    if (e.key === "ArrowDown") chairY = chairY + CHAIR_SPEED;
-  } else {
-    // 방식 B: 기록만 한다. 실제로 움직이는 건 게임 루프가 한다
-    keys[e.key] = true;
-  }
-});
-
-// 키에서 손을 떼는 순간: "떼었다"고 적어 둔다
-document.addEventListener("keyup", function (e) {
-  keys[e.key] = false;
-});
-
-// 다른 창을 누르면 keyup이 안 들어와서 키가 계속 눌린 걸로 남는다 → 전부 뗀 것으로 지운다
-window.addEventListener("blur", function () {
-  for (const key in keys) {
-    keys[key] = false;
-  }
-});
-
-// 다른 탭으로 가면 브라우저가 게임 루프(requestAnimationFrame)를 멈춘다. 그런데 시계(Date.now)는 계속 가서
-// 돌아오면 의자는 그대로인데 남은 시간만 줄어 있었다 → 숨어 있던 시간만큼 시작 시각들을 뒤로 밀어서 시간도 멈춘 것처럼 만든다
-document.addEventListener("visibilitychange", function () {
-  if (document.hidden) {
-    hiddenAt = Date.now();
-  } else if (hiddenAt !== 0) {
-    // 일시 정지 중이었으면 건너뛴다 (계속할 때 멈춰 있던 시간 전체를 한꺼번에 민다)
-    if (gameState !== "paused") shiftClocks(Date.now() - hiddenAt);
-    hiddenAt = 0;
-  }
-});
-
-// ============================================================
-// ④ 함수들: 계산(updateGame 등) → 되돌리기·트랙 → 그리기 → 배치·도우미
-// ============================================================
-
-// ===== 디버그 정보 그리기 (화면 좌표): 화면에 숫자를 띄워 두면 콘솔을 안 봐도 상태가 보인다 =====
-function drawDebugInfo() {
-  const lines = [
-    "[디버그]  D 키로 끄기",
-    "gameState: " + gameState,
-    "의자 x, y: " + Math.round(chairX) + ", " + Math.round(chairY),
-    "속도: " + Math.hypot(chairVX, chairVY).toFixed(1) + " (최고 " + CHAIR_SPEED + ")",
-    "트랙 위치: " + Math.round(chairS) + " / " + Math.round(TRACK_LENGTH) + (chairOnBridge ? "  (고가 위)" : ""),
-    "자동차 " + cars.length + " · 콘 " + cones.length + " · 건너는 학생 " + crossers.length + " · 인도 학생 " + students.length,
-    "점수(score): " + score + "  · 남은 시간: " + (remainingMs / 1000).toFixed(1) + "초",
-    "슬로우 " + slowTimer + " · 스턴 " + stunTimer + " · 무적 " + hitCooldown,
-    "부스터 게이지: " + boostGauge.toFixed(2) + " · 부스터 " + boostTimer,
-    "자동차 속도 ×" + carSpeedRate.toFixed(1) + " · 다음 상승 " + nextLevelUp + "초",
-  ];
-  const lineHeight = 17;
-  ctx.fillStyle = "rgba(0, 0, 0, 0.6)";
-  ctx.fillRect(10, 70, 330, lines.length * lineHeight + 10);
-  ctx.fillStyle = "#7CFC00";
-  ctx.font = "12px monospace";
-  ctx.textAlign = "left";
-  ctx.textBaseline = "top";
-  for (let i = 0; i < lines.length; i++) {
-    ctx.fillText(lines[i], 18, 75 + i * lineHeight);
+// ===== 고가 높이: 고가 직선의 양 끝 RAMP_LENGTH 동안 부드럽게 오르내린다 =====
+let bridgeStartS = Infinity;
+let bridgeEndS = -Infinity;
+for (const p of trackSamples) {
+  if (p.bridge) {
+    bridgeStartS = Math.min(bridgeStartS, p.s);
+    bridgeEndS = Math.max(bridgeEndS, p.s);
   }
 }
+function heightAtS(s) {
+  const p = pointAt(s);
+  if (!p.bridge) return 0;
+  const t = Math.max(0, Math.min(1, Math.min(s - bridgeStartS, bridgeEndS - s) / RAMP_LENGTH));
+  return BRIDGE_HEIGHT * t * t * (3 - 2 * t);   // 0 → 1로 가되 처음과 끝은 천천히 (smoothstep)
+}
+for (const p of trackSamples) {
+  p.h = heightAtS(p.s);   // 트랙 점마다 높이를 미리 계산해 둔다
+}
+
+// ===== Three.js 준비: 그리는 도구(renderer), 무대(scene), 카메라 =====
+const canvas = document.getElementById("game");
+const renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true });
+renderer.setSize(SCREEN_WIDTH, SCREEN_HEIGHT, false);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x9fd3ff);
+scene.fog = new THREE.Fog(0x9fd3ff, 1500, 3300);   // 멀리 있는 것은 하늘색으로 흐려진다
+
+const camera = new THREE.PerspectiveCamera(60, SCREEN_WIDTH / SCREEN_HEIGHT, 5, 4000);
+let camHeight = CAM_HEIGHT;
+
+// 빛: 하늘에서 고르게 비추는 빛 + 해(그림자를 만드는 빛). 해는 의자를 따라다닌다
+scene.add(new THREE.HemisphereLight(0xdff2ff, 0x4a7a3a, 0.75));
+const sun = new THREE.DirectionalLight(0xffffff, 0.75);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+sun.shadow.camera.left = -700;
+sun.shadow.camera.right = 700;
+sun.shadow.camera.top = 700;
+sun.shadow.camera.bottom = -700;
+sun.shadow.camera.near = 10;
+sun.shadow.camera.far = 2500;
+scene.add(sun);
+scene.add(sun.target);
+
+// ===== 재료(색) 만들기 도우미 =====
+function mat(color) {
+  return new THREE.MeshLambertMaterial({ color: color, side: THREE.DoubleSide });
+}
+const MAT = {
+  road: mat(0x4d4d4d),
+  sidewalk: mat(0xbfbfbf),
+  white: mat(0xffffff),
+  yellow: mat(0xf2c200),
+  rail: mat(0x7a7a7a),
+  concrete: mat(0x9a9a9a),
+  pillar: mat(0x8c8c8c),
+  black: mat(0x222222),
+  trunk: mat(0x7a5230),
+  leaves: mat(0x3fae5a),
+};
+
+// ===== 잔디 바닥: 캔버스에 잔디 무늬를 그려서 바닥에 붙인다 (이미지 파일 없이) =====
+function makeGrassTexture() {
+  const c = document.createElement("canvas");
+  c.width = 128;
+  c.height = 128;
+  const g = c.getContext("2d");
+  g.fillStyle = "#3f9b3f";
+  g.fillRect(0, 0, 128, 128);
+  for (let i = 0; i < 500; i++) {
+    g.fillStyle = Math.random() < 0.5 ? "#368a36" : "#4aab48";
+    g.fillRect(Math.random() * 128, Math.random() * 128, 2, 3);
+  }
+  const texture = new THREE.CanvasTexture(c);
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  return texture;
+}
+{
+  const width = WORLD_RIGHT - WORLD_LEFT + 4000;
+  const depth = WORLD_BOTTOM - WORLD_TOP + 4000;
+  const texture = makeGrassTexture();
+  texture.repeat.set(width / 128, depth / 128);
+  const ground = new THREE.Mesh(new THREE.PlaneGeometry(width, depth), new THREE.MeshLambertMaterial({ map: texture }));
+  ground.rotation.x = -Math.PI / 2;   // 세워진 판을 눕혀서 바닥으로
+  ground.position.set((WORLD_LEFT + WORLD_RIGHT) / 2, 0, (WORLD_TOP + WORLD_BOTTOM) / 2);
+  ground.receiveShadow = true;
+  scene.add(ground);
+}
+
+// ===== 트랙 띠 만들기 =====
+// 트랙 점마다 길 가운데에서 옆으로 offA, offB 떨어진 두 점을 찍고, 이웃한 점끼리 삼각형 두 개로 이어 띠를 만든다
+// liftA, liftB는 두 점의 높이 (같으면 바닥처럼 눕고, 다르면 벽처럼 선다)
+// include(i)가 true인 점끼리만 잇는다 (예: 고가 구간만)
+function buildRibbon(offA, offB, liftA, liftB, include, material, receiveShadow) {
+  const positions = [];
+  const indices = [];
+  for (let i = 0; i < trackSamples.length; i++) {
+    const p = trackSamples[i];
+    const nx = -p.ty;   // 진행 방향의 오른쪽 옆 (2D의 x)
+    const nz = p.tx;    // (2D의 y → 3D의 z)
+    positions.push(p.x + nx * offA, p.h + liftA, p.y + nz * offA);
+    positions.push(p.x + nx * offB, p.h + liftB, p.y + nz * offB);
+    if (i > 0 && include(i - 1) && include(i)) {
+      const a = (i - 1) * 2;
+      indices.push(a, a + 1, a + 2, a + 1, a + 3, a + 2);
+    }
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setIndex(indices);
+  geometry.computeVertexNormals();
+  const mesh = new THREE.Mesh(geometry, material);
+  mesh.receiveShadow = receiveShadow !== false;
+  mesh.castShadow = true;
+  scene.add(mesh);
+  return mesh;
+}
+const everywhere = function () { return true; };
+const onBridge = function (i) { return trackSamples[i].bridge && trackSamples[i].h > 1; };
+const SIDE = ROAD_HALF + SIDEWALK_WIDTH;          // 길 가운데 ~ 인도 바깥 끝
+const OUTER = SIDE + RAIL_WIDTH;                  // 가드레일 바깥 끝
+
+buildRibbon(-ROAD_HALF, ROAD_HALF, 1, 1, everywhere, MAT.road);                      // 차도
+buildRibbon(-SIDE, -ROAD_HALF, CURB_HEIGHT, CURB_HEIGHT, everywhere, MAT.sidewalk);    // 왼쪽 인도
+buildRibbon(ROAD_HALF, SIDE, CURB_HEIGHT, CURB_HEIGHT, everywhere, MAT.sidewalk);      // 오른쪽 인도
+buildRibbon(-ROAD_HALF, -ROAD_HALF, 1, CURB_HEIGHT, everywhere, MAT.sidewalk);         // 인도 턱 (세운 띠)
+buildRibbon(ROAD_HALF, ROAD_HALF, 1, CURB_HEIGHT, everywhere, MAT.sidewalk);
+buildRibbon(-ROAD_HALF + 6, -ROAD_HALF + 10, 1.4, 1.4, everywhere, MAT.white);         // 흰 실선
+buildRibbon(ROAD_HALF - 10, ROAD_HALF - 6, 1.4, 1.4, everywhere, MAT.white);
+buildRibbon(-SIDE - RAIL_WIDTH / 2, -SIDE - RAIL_WIDTH / 2, CURB_HEIGHT, RAIL_HEIGHT, everywhere, MAT.rail);   // 가드레일
+buildRibbon(SIDE + RAIL_WIDTH / 2, SIDE + RAIL_WIDTH / 2, CURB_HEIGHT, RAIL_HEIGHT, everywhere, MAT.rail);
+buildRibbon(-OUTER, -OUTER, -DECK_THICKNESS, CURB_HEIGHT, onBridge, MAT.concrete);       // 고가 옆면
+buildRibbon(OUTER, OUTER, -DECK_THICKNESS, CURB_HEIGHT, onBridge, MAT.concrete);
+buildRibbon(-OUTER, OUTER, -DECK_THICKNESS, -DECK_THICKNESS, onBridge, MAT.concrete);   // 고가 밑면
+
+// ===== 길 위의 작은 사각형들 (노란 점선, 횡단보도, 출발선) =====
+// s0 ~ s1 구간에서, 길 가운데로부터 offA ~ offB 떨어진 사각형을 lift 높이에 깐다
+function addRoadQuad(positions, s0, s1, offA, offB, lift) {
+  const p0 = pointAt(s0);
+  const p1 = pointAt(s1);
+  const h0 = heightAtS(s0) + lift;
+  const h1 = heightAtS(s1) + lift;
+  const corners = [
+    [p0.x - p0.ty * offA, h0, p0.y + p0.tx * offA],
+    [p0.x - p0.ty * offB, h0, p0.y + p0.tx * offB],
+    [p1.x - p1.ty * offA, h1, p1.y + p1.tx * offA],
+    [p1.x - p1.ty * offB, h1, p1.y + p1.tx * offB],
+  ];
+  for (const k of [0, 1, 2, 1, 3, 2]) {
+    positions.push(corners[k][0], corners[k][1], corners[k][2]);
+  }
+}
+function addQuadMesh(positions, material) {
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  geometry.computeVertexNormals();
+  const mesh = new THREE.Mesh(geometry, material);
+  mesh.receiveShadow = true;
+  scene.add(mesh);
+}
+{
+  // 가운데 노란 점선: 50마다 30 길이
+  const dashes = [];
+  for (let s = START_LINE_S + 40; s < TRACK_LENGTH - 200; s += 50) {
+    addRoadQuad(dashes, s, s + 30, -2, 2, 1.5);
+  }
+  addQuadMesh(dashes, MAT.yellow);
+
+  // 횡단보도 (결승 앞 + 학생이 건너는 곳): 흰 줄무늬
+  const stripes = [];
+  for (const cs of crosswalks.concat(TRACK.training ? [] : [TRACK_LENGTH - 120])) {   // 연습 서킷은 결승 횡단보도도 없다
+    for (let x = -ROAD_HALF + 20; x < ROAD_HALF - 20; x += 40) {
+      addRoadQuad(stripes, cs - 20, cs + 20, x, x + 20, 1.5);
+    }
+  }
+  addQuadMesh(stripes, MAT.white);
+
+  // 출발선: 흰색·검은색 체크무늬 두 줄
+  const whites = [];
+  const blacks = [];
+  let col = 0;
+  for (let x = -ROAD_HALF; x < ROAD_HALF; x += 20) {
+    for (let row = 0; row < 2; row++) {
+      const target = (col + row) % 2 === 0 ? whites : blacks;
+      addRoadQuad(target, START_LINE_S - 20 + row * 20, START_LINE_S + row * 20, x, Math.min(x + 20, ROAD_HALF), 1.6);
+    }
+    col = col + 1;
+  }
+  addQuadMesh(whites, MAT.white);
+  addQuadMesh(blacks, MAT.black);
+}
+
+// ===== 고가 기둥: 고가 아래에 일정한 간격으로. 아래를 지나는 길 위에는 세우지 않는다 =====
+{
+  const pillarGeometry = new THREE.BoxGeometry(16, 1, 16);
+  for (let i = 0; i < trackSamples.length; i += 30) {
+    const p = trackSamples[i];
+    if (!p.bridge || p.h < 30) continue;
+    for (const side of [-1, 1]) {
+      const x = p.x - p.ty * side * (ROAD_HALF - 10);
+      const z = p.y + p.tx * side * (ROAD_HALF - 10);
+      let blocksRoad = false;
+      for (let k = 0; k < trackSamples.length; k += 4) {
+        const q = trackSamples[k];
+        if (!q.bridge && Math.hypot(q.x - x, q.y - z) < SIDE + 30) blocksRoad = true;
+      }
+      if (blocksRoad) continue;
+      const height = p.h - DECK_THICKNESS;
+      const pillar = new THREE.Mesh(pillarGeometry, MAT.pillar);
+      pillar.scale.y = height;
+      pillar.position.set(x, height / 2, z);
+      pillar.castShadow = true;
+      scene.add(pillar);
+    }
+  }
+}
+
+// ===== 나무: 줄기(원기둥) + 잎(공) =====
+// 나무가 수백 그루라서, 같은 모양을 한 번에 여러 개 그리는 InstancedMesh를 쓴다 (하나씩 그리면 느리다)
+{
+  const trunks = new THREE.InstancedMesh(new THREE.CylinderGeometry(5, 8, 70, 8), MAT.trunk, trees.length);
+  const crowns = new THREE.InstancedMesh(new THREE.SphereGeometry(1, 10, 8), MAT.leaves, trees.length);
+  const placer = new THREE.Object3D();   // 위치·크기를 계산해 주는 도우미
+  for (let i = 0; i < trees.length; i++) {
+    const x = trees[i].x + TREE_SIZE / 2;
+    const z = trees[i].y + TREE_SIZE / 2;
+    placer.position.set(x, 35, z);
+    placer.scale.set(1, 1, 1);
+    placer.updateMatrix();
+    trunks.setMatrixAt(i, placer.matrix);
+    const r = 36 + Math.random() * 18;
+    placer.position.set(x, 70 + r * 0.6, z);
+    placer.scale.set(r, r * 0.9, r);
+    placer.updateMatrix();
+    crowns.setMatrixAt(i, placer.matrix);
+  }
+  trunks.castShadow = true;
+  crowns.castShadow = true;
+  scene.add(trunks);
+  scene.add(crowns);
+}
+
+// ===== 강의실 건물: 결승 너머에 길게 세운 벽돌 건물 + 노란 문 =====
+function makeCanvasTexture(width, height, drawFn) {
+  const c = document.createElement("canvas");
+  c.width = width;
+  c.height = height;
+  drawFn(c.getContext("2d"));
+  return new THREE.CanvasTexture(c);
+}
+if (!TRACK.training) {   // 연습 서킷에는 강의실이 없다
+  const width = WORLD_RIGHT - WORLD_LEFT + 3000;
+  const facade = makeCanvasTexture(256, 128, function (g) {
+    g.fillStyle = "#9c4a3a";
+    g.fillRect(0, 0, 256, 128);
+    g.fillStyle = "#a8dadc";
+    for (let x = 20; x < 256; x += 64) {
+      g.fillRect(x, 30, 36, 28);
+      g.fillRect(x, 78, 36, 28);
+    }
+  });
+  facade.wrapS = THREE.RepeatWrapping;
+  facade.repeat.set(width / 256, 1);
+  const wall = mat(0x9c4a3a);
+  const front = new THREE.MeshLambertMaterial({ map: facade });
+  // 상자 여섯 면의 재료: [오른쪽, 왼쪽, 위, 아래, 앞(+z, 트랙 쪽), 뒤]
+  const building = new THREE.Mesh(new THREE.BoxGeometry(width, 220, 500), [wall, wall, wall, wall, front, wall]);
+  building.position.set(FINISH.x, 110, WORLD_TOP - 250);
+  building.receiveShadow = true;
+  scene.add(building);
+
+  const doorTexture = makeCanvasTexture(256, 128, function (g) {
+    const gradient = g.createLinearGradient(0, 0, 0, 128);
+    gradient.addColorStop(0, "#e6b800");
+    gradient.addColorStop(1, "#ffe066");
+    g.fillStyle = gradient;
+    g.fillRect(0, 0, 256, 128);
+    g.fillStyle = "#333333";
+    g.font = "bold 56px sans-serif";
+    g.textAlign = "center";
+    g.textBaseline = "middle";
+    g.fillText("강의실", 128, 66);
+  });
+  const door = new THREE.Mesh(new THREE.PlaneGeometry(140, 70), new THREE.MeshBasicMaterial({ map: doorTexture }));
+  door.position.set(FINISH.x, 36, WORLD_TOP + 1);
+  scene.add(door);
+}
+
+// ===== 모델 만들기: 기본 도형을 조립한다 (모두 앞이 -z 쪽, 바닥이 높이 0) =====
+function part(geometry, material, x, y, z) {
+  const mesh = new THREE.Mesh(geometry, material);
+  mesh.position.set(x, y, z);
+  mesh.castShadow = true;
+  return mesh;
+}
+
+// 바퀴 달린 사무용 의자 (폭 65cm, 등받이 위 1m): 방석 + 등받이(뒤쪽 = +z) + 팔걸이 + 가스 기둥 + 다리 5개 + 바퀴 5개
+function makeChair() {
+  const g = new THREE.Group();
+  const purple = mat(0xc256b0);
+  const darkPurple = mat(0x974189);
+  const dark = mat(0x2b2b2b);
+  g.add(part(new THREE.BoxGeometry(19, 4, 18), purple, 0, 15, 0));            // 방석 (높이 약 45cm)
+  g.add(part(new THREE.BoxGeometry(19, 17, 3), darkPurple, 0, 26, 9));        // 등받이
+  g.add(part(new THREE.BoxGeometry(1.5, 8, 2), dark, 0, 17, 8.5));            // 등받이 받침
+  g.add(part(new THREE.BoxGeometry(2, 1.5, 10), dark, -10.5, 21, 1));         // 팔걸이
+  g.add(part(new THREE.BoxGeometry(2, 1.5, 10), dark, 10.5, 21, 1));
+  g.add(part(new THREE.BoxGeometry(1.5, 6, 1.5), dark, -10.5, 18, 1));        // 팔걸이 기둥
+  g.add(part(new THREE.BoxGeometry(1.5, 6, 1.5), dark, 10.5, 18, 1));
+  g.add(part(new THREE.CylinderGeometry(1.3, 1.3, 9, 8), dark, 0, 8.5, 0));   // 가스 기둥
+  for (let k = 0; k < 5; k++) {
+    const angle = (k / 5) * Math.PI * 2;
+    const leg = part(new THREE.BoxGeometry(2, 1.5, 11), dark, Math.sin(angle) * 5.5, 3.5, -Math.cos(angle) * 5.5);
+    leg.rotation.y = -angle;
+    g.add(leg);
+    g.add(part(new THREE.SphereGeometry(1.8, 8, 6), mat(0x111111), Math.sin(angle) * 11, 1.8, -Math.cos(angle) * 11));
+  }
+  return g;
+}
+
+// 자동차 (폭 1.8m, 길이 4.5m, 높이 1.5m): 주황 차체 + 어두운 유리 지붕 + 전조등(앞 = -z) + 바퀴 4개
+function makeCar() {
+  const g = new THREE.Group();
+  g.add(part(new THREE.BoxGeometry(58, 20, 144), mat(0xff8c1a), 0, 16, 0));        // 차체 (바닥이 땅에서 6 떠 있다)
+  g.add(part(new THREE.BoxGeometry(50, 18, 72), mat(0x333a44), 0, 35, 8));         // 지붕과 유리
+  const lightMaterial = new THREE.MeshBasicMaterial({ color: 0xfff3a0 });
+  g.add(part(new THREE.BoxGeometry(12, 6, 2), lightMaterial, -19, 19, -72.5));     // 전조등
+  g.add(part(new THREE.BoxGeometry(12, 6, 2), lightMaterial, 19, 19, -72.5));
+  const tailMaterial = new THREE.MeshBasicMaterial({ color: 0xd62828 });
+  g.add(part(new THREE.BoxGeometry(12, 5, 2), tailMaterial, -19, 20, 72.5));       // 미등
+  g.add(part(new THREE.BoxGeometry(12, 5, 2), tailMaterial, 19, 20, 72.5));
+  for (const [x, z] of [[-27, -46], [27, -46], [-27, 46], [27, 46]]) {
+    const wheel = part(new THREE.CylinderGeometry(11, 11, 8, 14), mat(0x111111), x, 11, z);
+    wheel.rotation.z = Math.PI / 2;
+    g.add(wheel);
+  }
+  return g;
+}
+
+// 학생 (키 170cm, 어깨 45cm): 다리 두 개 + 초록 옷 몸통 + 팔 + 얼굴 + 머리카락
+function makeStudent() {
+  const g = new THREE.Group();
+  const pants = mat(0x2b3a55);
+  const shirt = mat(0x2e9e4f);
+  const skin = mat(0xf2c9a0);
+  g.add(part(new THREE.CylinderGeometry(2.6, 2.4, 26, 8), pants, -3.4, 13, 0));       // 다리
+  g.add(part(new THREE.CylinderGeometry(2.6, 2.4, 26, 8), pants, 3.4, 13, 0));
+  g.add(part(new THREE.CylinderGeometry(7.5, 6.5, 18, 10), shirt, 0, 35, 0));          // 몸통
+  g.add(part(new THREE.CylinderGeometry(1.8, 1.6, 17, 8), shirt, -9, 35, 0));         // 팔
+  g.add(part(new THREE.CylinderGeometry(1.8, 1.6, 17, 8), shirt, 9, 35, 0));
+  g.add(part(new THREE.SphereGeometry(5.5, 10, 8), skin, 0, 49, 0));                   // 얼굴 (키 약 54)
+  g.add(part(new THREE.SphereGeometry(5.8, 10, 8, 0, Math.PI * 2, 0, Math.PI / 2), mat(0x3b2a1e), 0, 50, 0.6));   // 머리카락
+  return g;
+}
+
+// 공사 콘 (높이 70cm, 받침 40cm): 받침 + 주황 원뿔 + 흰 반사 띠
+function makeCone() {
+  const g = new THREE.Group();
+  g.add(part(new THREE.BoxGeometry(13, 1.5, 13), mat(0xb34700), 0, 0.75, 0));
+  g.add(part(new THREE.ConeGeometry(5.5, 21, 16), mat(0xff7a00), 0, 12, 0));
+  g.add(part(new THREE.CylinderGeometry(3.1, 3.6, 3, 16), mat(0xffffff), 0, 11, 0));
+  return g;
+}
+
+// ===== 움직이는 것들의 3D 모델 (게임 계산은 2D 숫자 그대로, 화면만 3D) =====
+const chairModel = makeChair();
+chairModel.scale.setScalar(CHAIR_MODEL_SCALE);
+// 부스터 불꽃: 의자 뒤(+z)로 뿜어져 나오는 주황·노랑 원뿔 두 겹
+const boostFlame = new THREE.Group();
+{
+  const outer = new THREE.Mesh(new THREE.ConeGeometry(6, 26, 12), new THREE.MeshBasicMaterial({ color: 0xff7a1a, transparent: true, opacity: 0.85 }));
+  const inner = new THREE.Mesh(new THREE.ConeGeometry(3.5, 16, 12), new THREE.MeshBasicMaterial({ color: 0xfff2a0 }));
+  outer.rotation.x = Math.PI / 2;   // 원뿔 끝이 뒤(+z)를 향하게 눕힌다
+  inner.rotation.x = Math.PI / 2;
+  outer.position.z = 13;
+  inner.position.z = 8;
+  boostFlame.add(outer);
+  boostFlame.add(inner);
+  boostFlame.position.set(0, 10, 12);
+  boostFlame.visible = false;
+  chairModel.add(boostFlame);
+}
+
+// ===== 트랙 거리 s 지점의 경사: 앞으로 1 갈 때 높이가 얼마나 바뀌나 =====
+function slopeAtS(s) {
+  return (heightAtS(s + 5) - heightAtS(s - 5)) / 10;
+}
+scene.add(chairModel);
+const carModels = [];
+for (let i = 0; i < CAR_COUNT; i++) {
+  carModels.push(makeCar());
+  scene.add(carModels[i]);
+}
+const studentModels = students.map(function () { const m = makeStudent(); scene.add(m); return m; });
+const crosserModels = crossers.map(function () { const m = makeStudent(); scene.add(m); return m; });
+let coneModels = [];
+let coneModelsFor = null;   // 콘 모델이 어떤 cones 배열로 만들어졌는지 (콘이 사라지거나 새로 깔리면 다시 만든다)
+let coneCount = -1;
+
+let chairElevation = 0;     // 의자의 지금 높이 (고가 위면 올라간다)
+
+// ===== 스키드 마크: 조각 SKID_MAX개를 담을 수 있는 하나의 모양을 매 프레임 고쳐 쓴다 =====
+const skidPositions = new Float32Array(SKID_MAX * 4 * 3);
+const skidGeometry = new THREE.BufferGeometry();
+skidGeometry.setAttribute("position", new THREE.BufferAttribute(skidPositions, 3));
+{
+  const indices = [];
+  for (let k = 0; k < SKID_MAX; k++) {
+    const a = k * 4;
+    indices.push(a, a + 1, a + 2, a + 1, a + 3, a + 2);
+  }
+  skidGeometry.setIndex(indices);
+}
+const skidMesh = new THREE.Mesh(skidGeometry, new THREE.MeshBasicMaterial({
+  color: 0x1a1a1a, transparent: true, opacity: 0.5, side: THREE.DoubleSide, depthWrite: false,
+}));
+skidMesh.frustumCulled = false;
+scene.add(skidMesh);
+
+// ===== 연기: 공 모양 SMOKE_MAX개를 미리 만들어 두고 필요한 만큼만 보인다 =====
+const smokeModels = [];
+for (let k = 0; k < SMOKE_MAX; k++) {
+  const m = new THREE.Mesh(new THREE.SphereGeometry(1, 8, 6), new THREE.MeshBasicMaterial({ color: 0xe6e6e6, transparent: true, depthWrite: false }));
+  m.visible = false;
+  scene.add(m);
+  smokeModels.push(m);
+}
+
+// ===== 3D 화면 맞추기: 계산된 숫자대로 모델을 옮기고 카메라를 놓는다 =====
+// 2D 각도(0 = 맵 위쪽, 시계 방향)는 3D에서 y축으로 -각도만큼 돌리면 같은 방향이 된다
+function render3D() {
+  const cx = chairX + CHAIR_SIZE / 2;
+  const cy = chairY + CHAIR_SIZE / 2;
+
+  // 의자 높이: 고가 위면 그 자리 고가 높이로, 아니면 땅(0). 계단처럼 튀지 않게 조금씩 따라간다
+  const targetElevation = chairOnBridge ? trackSamples[chairTrackIndex].h : 0;
+  chairElevation = chairElevation + (targetElevation - chairElevation) * 0.3;
+  chairModel.position.set(cx, chairElevation, cy);
+  // 오르막·내리막에서는 도로를 따라 앞뒤로 기운다
+  // 경사 = 트랙 방향으로 1 갈 때 높이가 얼마나 바뀌나. 의자가 트랙과 비스듬히 서 있으면 그만큼 덜 기운다
+  let chairPitch = 0;
+  if (chairOnBridge) {
+    const p = trackSamples[chairTrackIndex];
+    const facing = Math.sin(chairAngle) * p.tx - Math.cos(chairAngle) * p.ty;   // 의자 방향과 트랙 방향이 같으면 1
+    chairPitch = Math.atan(slopeAtS(chairS) * facing);
+  }
+  // 번아웃 중에는 부르르 떤다
+  const shake = isBurnout ? (Math.random() - 0.5) * 0.12 : 0;
+  chairModel.rotation.set(chairPitch, -chairAngle + shake, 0, "YXZ");
+  // 부스터 불꽃: 부스터 중에만 보이고, 길이가 떨려서 타오르는 것처럼 보인다
+  boostFlame.visible = boostTimer > 0 || miniBoostTimer > 0;
+  boostFlame.scale.set(1, 0.8 + Math.random() * 0.5, 1);
+  // 무적 시간에는 깜빡인다
+  chairModel.visible = !(hitCooldown > 0 && Math.floor(hitCooldown / 5) % 2 === 0);
+
+  // 자동차
+  for (let i = 0; i < cars.length; i++) {
+    const pose = carPose(cars[i].s, cars[i].lane, cars[i].speed > 0);
+    const h = cars[i].s <= TRACK_LENGTH ? heightAtS(cars[i].s) : 0;
+    carModels[i].position.set(pose.x, h, pose.y);
+    // 오르막·내리막에서는 도로를 따라 기운다 (마주 오는 차는 경사가 반대로 보인다)
+    const pitch = cars[i].s <= TRACK_LENGTH ? Math.atan(slopeAtS(cars[i].s) * (cars[i].speed > 0 ? 1 : -1)) : 0;
+    carModels[i].rotation.set(pitch, -pose.angle, 0, "YXZ");
+  }
+
+  // 인도 학생과 건너는 학생: 걷는 방향을 보고, 걸음마다 몸이 좌우로 흔들린다
+  for (let i = 0; i < students.length; i++) {
+    const st = students[i];
+    const p = pointAt(st.s);
+    const pos = trackPosition(st.s, st.side * (ROAD_HALF + SIDEWALK_WIDTH / 2));
+    const dir = st.speed >= 0 ? 1 : -1;
+    studentModels[i].position.set(pos.x, CURB_HEIGHT, pos.y);
+    studentModels[i].rotation.set(0, -Math.atan2(p.tx * dir, -p.ty * dir), Math.sin(st.s * 0.3) * STUDENT_WOBBLE);
+  }
+  for (let i = 0; i < crossers.length; i++) {
+    const cr = crossers[i];
+    const p = pointAt(cr.s);
+    const pos = trackPosition(cr.s, cr.offset);
+    const dir = cr.speed >= 0 ? 1 : -1;
+    const onSidewalk = Math.abs(cr.offset) > ROAD_HALF;
+    crosserModels[i].position.set(pos.x, onSidewalk ? CURB_HEIGHT : 1, pos.y);
+    crosserModels[i].rotation.set(0, -Math.atan2(-p.ty * dir, -p.tx * dir), Math.sin(cr.offset * 0.3) * STUDENT_WOBBLE);
+  }
+
+  // 콘: 부딪혀 사라졌거나 다시 시작해서 새로 깔렸으면 모델을 다시 만든다
+  if (coneModelsFor !== cones || coneCount !== cones.length) {
+    for (const m of coneModels) scene.remove(m);
+    coneModels = cones.map(function (cone) {
+      const m = makeCone();
+      const pos = trackPosition(cone.s, cone.offset);
+      m.position.set(pos.x, 1, pos.y);
+      scene.add(m);
+      return m;
+    });
+    coneModelsFor = cones;
+    coneCount = cones.length;
+  }
+
+  // 스키드 마크: 자국 조각마다 두께 SKID_WIDTH인 얇은 사각형
+  let count = 0;
+  for (let k = Math.max(0, skidMarks.length - SKID_MAX); k < skidMarks.length; k++) {
+    const m = skidMarks[k];
+    const length = Math.hypot(m.x2 - m.x1, m.y2 - m.y1) || 1;
+    const sx = -(m.y2 - m.y1) / length * SKID_WIDTH / 2;   // 자국 방향의 옆으로 두께 절반
+    const sz = (m.x2 - m.x1) / length * SKID_WIDTH / 2;
+    const y = (m.h || 0) + 1.8;
+    const base = count * 12;
+    skidPositions.set([
+      m.x1 - sx, y, m.y1 - sz,  m.x1 + sx, y, m.y1 + sz,
+      m.x2 - sx, y, m.y2 - sz,  m.x2 + sx, y, m.y2 + sz,
+    ], base);
+    count = count + 1;
+  }
+  skidGeometry.setDrawRange(0, count * 6);
+  skidGeometry.attributes.position.needsUpdate = true;
+
+  // 연기
+  for (let k = 0; k < SMOKE_MAX; k++) {
+    const m = smokeModels[k];
+    const smoke = smokes[k];
+    if (!smoke) {
+      m.visible = false;
+      continue;
+    }
+    m.visible = true;
+    m.position.set(smoke.x, (smoke.h || 0) + 6 + (SMOKE_LIFE - smoke.life) * 0.3, smoke.y);
+    m.scale.setScalar(smoke.size);
+    m.material.opacity = 0.5 * smoke.life / SMOKE_LIFE;
+  }
+
+  // 카메라: 의자 뒤 CAM_DISTANCE, 위 camHeight에서 의자 앞쪽을 바라본다
+  // 고가 아래를 지날 때는 카메라를 낮춰서 고가 바닥에 부딪히지 않게 한다
+  const forwardX = Math.sin(cameraAngle);
+  const forwardZ = -Math.cos(cameraAngle);
+  const camX = cx - forwardX * CAM_DISTANCE;
+  const camZ = cy - forwardZ * CAM_DISTANCE;
+  const under = isChairUnderBridge() || isPointUnderBridge(camX, camZ);
+  camHeight = camHeight + ((under ? CAM_UNDER_HEIGHT : CAM_HEIGHT) - camHeight) * 0.1;
+  camera.position.set(camX, chairElevation + camHeight, camZ);
+  // 부스터 중에는 시야가 넓어져서 더 빨라 보인다
+  const targetFov = boostTimer > 0 ? BOOST_FOV : miniBoostTimer > 0 ? 67 : 60;
+  if (Math.abs(camera.fov - targetFov) > 0.1) {
+    camera.fov = camera.fov + (targetFov - camera.fov) * 0.1;
+    camera.updateProjectionMatrix();
+  }
+  camera.lookAt(cx + forwardX * CAM_LOOK_AHEAD, chairElevation + 10, cy + forwardZ * CAM_LOOK_AHEAD);
+
+  // 해와 그림자도 의자를 따라다닌다
+  sun.position.set(cx + 400, chairElevation + 700, cy + 250);
+  sun.target.position.set(cx, 0, cy);
+
+  renderer.render(scene, camera);
+}
+
+// ===== 트랙 고르기 =====
+// 주소 뒤의 ?track=번호를 읽는다. 없거나 이상하면 1번(보통)
+function readTrackIndex() {
+  const params = new URLSearchParams(location.search);
+  if (!params.has("track")) return 1;   // 주소에 없으면 Number(null)이 0이 되니까 먼저 확인한다
+  const n = Number(params.get("track"));
+  if (Number.isInteger(n) && n >= 0 && n < TRACKS.length) return n;
+  return 1;
+}
+
+// 선택한 트랙으로 출발한다. 지금 트랙이면 그대로 다시 시작하고,
+// 다른 트랙이면 그 트랙 번호를 주소에 붙여 페이지를 다시 불러온다
+// (길·나무·장애물은 시작할 때 한 번 만들기 때문에, 다시 불러오는 게 가장 깔끔하다)
+function chooseTrack(index) {
+  if (index === TRACK_INDEX) {
+    resetGame();
+  } else {
+    location.search = "?track=" + index;
+  }
+}
+
+// ===== 트랙별 최고 점수 (브라우저에 저장, 새로고침해도 남는다) =====
+function loadBest(index) {
+  try {
+    return Number(localStorage.getItem("chairDrift.best." + index)) || 0;
+  } catch (e) {
+    return 0;   // 저장소를 못 쓰는 환경이면 기록 없이
+  }
+}
+// 더 높은 점수면 저장하고 true를 돌려준다
+function saveBest(index, value) {
+  if (value <= loadBest(index)) return false;
+  try {
+    localStorage.setItem("chairDrift.best." + index, String(value));
+  } catch (e) {
+    // 저장소를 못 쓰면 저장만 건너뛴다
+  }
+  return true;
+}
+
+// ===== 트랙 미리보기: 꼭짓점을 이어 작은 지도로 그린다 (g = 2D 붓) =====
+function drawTrackPreview(g, points, x, y, width, height, color) {
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  for (const p of points) {
+    minX = Math.min(minX, p.x);
+    maxX = Math.max(maxX, p.x);
+    minY = Math.min(minY, p.y);
+    maxY = Math.max(maxY, p.y);
+  }
+  const scale = Math.min(width / (maxX - minX || 1), height / (maxY - minY || 1)) * 0.85;
+  const offsetX = x + (width - (maxX - minX) * scale) / 2;
+  const offsetY = y + (height - (maxY - minY) * scale) / 2;
+  g.strokeStyle = color;
+  g.lineWidth = 4;
+  g.lineJoin = "round";
+  g.beginPath();
+  for (let i = 0; i < points.length; i++) {
+    const px = offsetX + (points[i].x - minX) * scale;
+    const py = offsetY + (points[i].y - minY) * scale;
+    if (i === 0) g.moveTo(px, py);
+    else g.lineTo(px, py);
+  }
+  g.stroke();
+  // 출발: 빨간 점, 결승(강의실): 노란 점
+  const first = points[0];
+  const last = points[points.length - 1];
+  g.fillStyle = "#ff4d4d";
+  g.beginPath();
+  g.arc(offsetX + (first.x - minX) * scale, offsetY + (first.y - minY) * scale, 5, 0, Math.PI * 2);
+  g.fill();
+  g.fillStyle = "#ffd84d";
+  g.beginPath();
+  g.arc(offsetX + (last.x - minX) * scale, offsetY + (last.y - minY) * scale, 5, 0, Math.PI * 2);
+  g.fill();
+}
+
+// ===== 카운트다운 시작: 3, 2, 1, GO! 가 끝나야 달릴 수 있다 =====
+function startCountdown() {
+  gameState = "countdown";
+  isNewRecord = false;
+  countdownStart = Date.now();
+  upPressTime = 0;
+  startBoostChecked = false;
+  lastCountBeep = 0;
+}
+
+// ===== 카운트다운 중 매 프레임: 3초가 지나면 GO! (그때부터 제한 시간이 흐른다) =====
+function updateCountdown() {
+  // 숫자가 바뀔 때마다 한 번씩 삑 (3, 2, 1)
+  const count = Math.ceil((COUNTDOWN_MS - (Date.now() - countdownStart)) / 1000);
+  if (count > 0 && count !== lastCountBeep) {
+    lastCountBeep = count;
+    playSound("count");
+  }
+  if (Date.now() - countdownStart >= COUNTDOWN_MS) {
+    gameState = "playing";
+    goTime = Date.now();
+    startTime = goTime;
+    lapStartTime = goTime;   // 연습 서킷 첫 바퀴 시계
+    playSound("go");
+  }
+}
+
+// ===== 출발 부스터 판정 (GO! 직후 잠깐 동안, 달리는 중 매 프레임) =====
+// ↑를 새로 누른 시각이 GO! 0.3초 전 ~ 0.25초 후 사이면 성공. 판정은 한 판에 한 번만
+function checkStartBoost() {
+  if (startBoostChecked) return;
+  const inWindow = upPressTime >= goTime - START_BOOST_EARLY_MS && upPressTime <= goTime + START_BOOST_LATE_MS;
+  if (upPressTime !== 0 && inWindow) {
+    boostTimer = START_BOOST_FRAMES;
+    playSound("boost");
+    chairVX = Math.sin(chairAngle) * CHAIR_SPEED;   // 바로 튀어 나가게 속도를 준다
+    chairVY = -Math.cos(chairAngle) * CHAIR_SPEED;
+    launchText = "출발 부스터!";
+    launchMessageTimer = 60;
+    startBoostChecked = true;
+  } else if (Date.now() > goTime + START_BOOST_LATE_MS) {
+    // 기회가 지나갔다. GO! 전에 미리 눌러서 계속 누르고 있었다면 "너무 빨랐어요"
+    if (upPressTime !== 0 && upPressTime < goTime - START_BOOST_EARLY_MS) {
+      launchText = "너무 빨랐어요";
+      launchMessageTimer = 60;
+    }
+    startBoostChecked = true;
+  }
+}
+
+// ===== 이 지점이 지금 달리는 길과 이어지지 않은 고가 아래인가 (카메라 위치 검사용) =====
+function isPointUnderBridge(x, z) {
+  if (chairOnBridge) return false;
+  for (let i = 0; i < trackSamples.length; i += 2) {
+    const q = trackSamples[i];
+    if (!q.bridge || q.h < 30) continue;
+    if (Math.abs(i - chairTrackIndex) <= TRACK_SEARCH) continue;
+    if (Math.hypot(q.x - x, q.y - z) < OUTER + 30) return true;
+  }
+  return false;
+}
+
+// ===== 화면 위 글자들 (HTML로 그린다): 시간, 점수, 미니맵, 경고, 결과 =====
+const hud = {
+  time: document.getElementById("time"),
+  score: document.getElementById("score"),
+  drift: document.getElementById("drift"),
+  hit: document.getElementById("hit"),
+  flash: document.getElementById("flash"),
+  wrongWay: document.getElementById("wrong-way"),
+  result: document.getElementById("result"),
+  resultTitle: document.getElementById("result-title"),
+  resultLines: document.getElementById("result-lines"),
+  minimap: document.getElementById("minimap"),
+  gauge: document.getElementById("gauge"),
+  gaugeFill: document.querySelector("#gauge .fill"),
+  gaugeLabel: document.querySelector("#gauge span"),
+  burnout: document.getElementById("burnout"),
+  burnoutFill: document.querySelector("#burnout .fill"),
+  boostText: document.getElementById("boost-text"),
+  countdown: document.getElementById("countdown"),
+  countNum: document.getElementById("count-num"),
+  countHint: document.getElementById("count-hint"),
+  debug: document.getElementById("debug"),
+  start: document.getElementById("start"),
+  pause: document.getElementById("pause"),
+  sound: document.getElementById("sound"),
+};
+// 일시 정지 메뉴 줄 만들기
+const pauseRows = PAUSE_OPTIONS.map(function (text) {
+  const row = document.createElement("div");
+  row.className = "option";
+  row.textContent = text;
+  document.getElementById("pause-options").appendChild(row);
+  return row;
+});
+
+// ===== 화면 크기 맞추기 (9장: 휴대폰처럼 화면이 800보다 좁으면 게임 화면 전체를 줄인다) =====
+// 3D 그림과 글자의 좌표는 800×600 그대로 두고, 보이는 크기만 비율(zoom)로 줄인다 → 좌표 계산이 깨지지 않는다
+const stage = document.getElementById("stage");
+function fitStageToWindow() {
+  const scale = Math.min(1, window.innerWidth / (SCREEN_WIDTH + 2), window.innerHeight / (SCREEN_HEIGHT + 2));   // +2는 테두리
+  stage.style.zoom = scale;
+}
+fitStageToWindow();
+window.addEventListener("resize", fitStageToWindow);   // 휴대폰을 가로·세로로 돌릴 때도 다시 맞춘다
+hud.select = document.getElementById("select");
+// 트랙 선택 카드: 트랙마다 이름, 난이도, 작은 지도, 제한 시간, 최고 점수
+const selectCards = [];
+for (let i = 0; i < TRACKS.length; i++) {
+  const track = TRACKS[i];
+  const card = document.createElement("div");
+  card.className = "card";
+  const best = loadBest(i);
+  card.innerHTML = '<div class="name">' + track.name + '</div>' +
+    '<div class="level" style="color:' + track.levelColor + '">' + track.level + '</div>' +
+    '<canvas width="180" height="160"></canvas>' +
+    (track.training
+      ? '<div class="info">장애물 없음 · 계속 돌기</div>' +
+        '<div class="best">' + (loadBestLap(i) > 0 ? "최고 랩 " + loadBestLap(i).toFixed(2) + "초" : "기록 없음") + '</div>'
+      : '<div class="info">제한 시간 ' + track.timeLimit + '초 · 차 ' + track.carCount + '대</div>' +
+        '<div class="best">' + (best > 0 ? "최고 점수 " + best : "기록 없음") + '</div>');
+  drawTrackPreview(card.querySelector("canvas").getContext("2d"), track.points, 0, 0, 180, 160, "#ffffff");
+  document.getElementById("cards").appendChild(card);
+  selectCards.push(card);
+}
+const miniCtx = hud.minimap.getContext("2d");
+const miniTrack = document.createElement("canvas");   // 트랙 모양은 한 번만 그려 두고 매번 복사한다
+miniTrack.width = hud.minimap.width;
+miniTrack.height = hud.minimap.height;
+const MINI_SCALE = (miniTrack.width - 10) / Math.max(WORLD_RIGHT - WORLD_LEFT, WORLD_BOTTOM - WORLD_TOP);
+function miniX(x) { return 5 + (x - WORLD_LEFT) * MINI_SCALE + (miniTrack.width - 10 - (WORLD_RIGHT - WORLD_LEFT) * MINI_SCALE) / 2; }
+function miniY(y) { return 5 + (y - WORLD_TOP) * MINI_SCALE; }
+{
+  const g = miniTrack.getContext("2d");
+  g.lineWidth = 3;
+  g.lineJoin = "round";
+  for (const level of [false, true]) {
+    g.strokeStyle = level ? "#ff9f1c" : "#ffffff";
+    g.beginPath();
+    let drawing = false;
+    for (let i = 0; i < trackSamples.length; i += 4) {
+      const p = trackSamples[i];
+      if (p.bridge === level) {
+        if (drawing) g.lineTo(miniX(p.x), miniY(p.y));
+        else g.moveTo(miniX(p.x), miniY(p.y));
+        drawing = true;
+      } else {
+        drawing = false;
+      }
+    }
+    g.stroke();
+  }
+}
+
+function updateHud() {
+  // 남은 시간: 10초 이하면 빨갛게, 1초 줄 때마다 크게 튀었다가 작아진다
+  hud.time.textContent = "남은 시간 " + timeLeft + "초";
+  if (TRACK.training) {
+    // 연습 서킷: 몇 번째 바퀴인지와 지금 바퀴 시간
+    // 달리는 중이면 지금까지, 일시 정지 중이면 멈춘 순간까지의 시간
+    let lapSeconds = 0;
+    if (gameState === "playing") lapSeconds = (Date.now() - lapStartTime) / 1000;
+    if (gameState === "paused" && pausedFrom === "playing") lapSeconds = (pausedAt - lapStartTime) / 1000;
+    hud.time.textContent = "랩 " + (lapsDone + 1) + " · " + lapSeconds.toFixed(1) + "초";
+    hud.time.style.color = "#ffffff";
+    hud.time.style.fontSize = "22px";
+  } else if (timeLeft <= 10 && gameState === "playing") {
+    const passed = 1 - (remainingMs % 1000) / 1000;
+    hud.time.style.color = "#ff4d4d";
+    hud.time.style.fontSize = (24 + 6 * (1 - passed)) + "px";
+  } else {
+    hud.time.style.color = timeLeft <= 10 ? "#ff4d4d" : "#ffffff";
+    hud.time.style.fontSize = "24px";
+  }
+  if (TRACK.training) {
+    // 연습 서킷: 지난 바퀴 기록과 최고 랩
+    const bestLap = loadBestLap(TRACK_INDEX);
+    hud.score.innerHTML = (lastLapSeconds > 0 ? "지난 랩: " + lastLapSeconds.toFixed(2) + "초" : "지난 랩: -") +
+      "<small>" + (bestLap > 0 ? "최고 랩: " + bestLap.toFixed(2) + "초" : "최고 랩: 기록 없음") + "</small>";
+  } else {
+    // 점수 + 그 아래 작게 이 트랙 최고 점수 (8장: 플레이 중에도 목표가 보이게)
+    const bestScore = loadBest(TRACK_INDEX);
+    hud.score.innerHTML = "점수: " + (gameState === "playing" || gameState === "countdown" ? Math.floor(remainingMs / 10) : score) +
+      "<small>" + (bestScore > 0 ? "최고 점수: " + bestScore : "최고 점수: 기록 없음") + "</small>";
+  }
+
+  // 카운트다운: 3, 2, 1 → GO! (GO!는 0.7초 동안)
+  if (gameState === "countdown") {
+    hud.countdown.style.display = "block";
+    hud.countNum.textContent = String(Math.ceil((COUNTDOWN_MS - (Date.now() - countdownStart)) / 1000));
+    hud.countNum.style.color = "#ffffff";
+    hud.countHint.style.display = "block";
+  } else if (gameState === "playing" && Date.now() - goTime < 700) {
+    hud.countdown.style.display = "block";
+    hud.countNum.textContent = "GO!";
+    hud.countNum.style.color = "#7CFC00";
+    hud.countHint.style.display = "none";
+  } else {
+    hud.countdown.style.display = "none";
+  }
+
+  hud.drift.style.display = isDrifting ? "block" : "none";
+  hud.hit.style.display = hitMessageTimer > 0 ? "block" : "none";
+  hud.hit.textContent = hitMessage;
+  hud.hit.style.color = hitMessage === "슬로우!" ? "#7ec8ff" : "#ff5c5c";
+  hud.flash.style.opacity = flashTimer > 0 ? 0.35 * flashTimer / 15 : 0;
+
+  // 부스터 게이지: 찬 만큼 막대가 길어지고, 가득 차면 반짝이며 "Ctrl" 안내
+  hud.gaugeFill.style.width = (boostGauge * 100) + "%";
+  hud.gauge.classList.toggle("ready", boostGauge >= 1);
+  hud.gaugeLabel.textContent = boostGauge >= 1 ? "부스터 준비! Ctrl" : "부스터 (드리프트하면 찬다)";
+
+  // 번아웃: 모인 힘 막대
+  hud.burnout.style.display = isBurnout ? "block" : "none";
+  hud.burnoutFill.style.width = (burnoutCharge * 100) + "%";
+
+  // 부스터 중 / 출발 대시 글자
+  if (launchMessageTimer > 0) {
+    hud.boostText.textContent = launchText;
+    hud.boostText.style.color = launchText === "너무 빨랐어요" ? "#cccccc" : launchText === "자동차가 빨라졌다!" ? "#ff5c5c" : "#ff9f1c";
+    hud.boostText.style.display = "block";
+  } else if (boostTimer > 0) {
+    hud.boostText.textContent = "BOOST!";
+    hud.boostText.style.color = "#ff9f1c";
+    hud.boostText.style.display = "block";
+  } else {
+    hud.boostText.style.display = "none";
+  }
+  hud.wrongWay.style.display = wrongWayFrames > WRONG_WAY_DELAY && Date.now() % 600 < 400 ? "block" : "none";
+
+  // 미니맵: 트랙 + 강의실(노란 점) + 나(빨간 점)
+  miniCtx.clearRect(0, 0, hud.minimap.width, hud.minimap.height);
+  miniCtx.drawImage(miniTrack, 0, 0);
+  miniCtx.fillStyle = "#ffd84d";
+  miniCtx.beginPath();
+  miniCtx.arc(miniX(FINISH.x), miniY(FINISH.y), 5, 0, Math.PI * 2);
+  miniCtx.fill();
+  miniCtx.fillStyle = "#ff4d4d";
+  miniCtx.beginPath();
+  miniCtx.arc(miniX(chairX + CHAIR_SIZE / 2), miniY(chairY + CHAIR_SIZE / 2), 4, 0, Math.PI * 2);
+  miniCtx.fill();
+
+  // 디버그 표시 (showDebug가 true일 때만)
+  hud.debug.style.display = showDebug ? "block" : "none";
+  if (showDebug) {
+    hud.debug.textContent = [
+      "[디버그]  D 키로 끄기",
+      "gameState: " + gameState,
+      "의자 x, y: " + Math.round(chairX) + ", " + Math.round(chairY),
+      "속도: " + Math.hypot(chairVX, chairVY).toFixed(1) + " (최고 " + CHAIR_SPEED + ")",
+      "트랙 위치: " + Math.round(chairS) + " / " + Math.round(TRACK_LENGTH) + (chairOnBridge ? "  (고가 위)" : ""),
+      "자동차 " + cars.length + " · 콘 " + cones.length + " · 건너는 학생 " + crossers.length + " · 인도 학생 " + students.length,
+      "점수(score): " + score + "  · 남은 시간: " + (remainingMs / 1000).toFixed(1) + "초",
+      "슬로우 " + slowTimer + " · 스턴 " + stunTimer + " · 무적 " + hitCooldown,
+      "부스터 게이지: " + boostGauge.toFixed(2) + " · 부스터 " + boostTimer,
+      "자동차 속도 ×" + carSpeedRate.toFixed(2) + " · 다음 상승 " + nextLevelUp + "초",
+    ].join("\n");
+  }
+
+  // 시작 화면 / 일시 정지 메뉴 / 소리 표시 (8장)
+  hud.start.style.display = gameState === "start" ? "flex" : "none";
+  hud.pause.style.display = gameState === "paused" ? "flex" : "none";
+  for (let i = 0; i < pauseRows.length; i++) {
+    pauseRows[i].classList.toggle("selected", i === pauseIndex);
+  }
+  hud.sound.textContent = isMuted ? "🔇 소리 꺼짐 (M)" : "🔊 M: 음소거";
+  hud.sound.classList.toggle("muted", isMuted);
+
+  // 결과 화면
+  // 트랙 선택 화면
+  hud.select.style.display = gameState === "select" ? "flex" : "none";
+  if (gameState === "select") {
+    for (let i = 0; i < selectCards.length; i++) {
+      selectCards[i].classList.toggle("selected", i === menuIndex);
+    }
+  }
+
+  if (gameState !== "finished" && gameState !== "gameover") {
+    hud.result.style.display = "none";
+  } else {
+    hud.result.style.display = "flex";
+    if (gameState === "finished") {
+      hud.resultTitle.textContent = "강의실 도착!";
+      hud.resultTitle.style.color = "#ffd84d";
+      hud.resultLines.innerHTML = TRACK.name + " (" + TRACK.level + ")<br>점수: " + score + (isNewRecord ? "  신기록!" : "") +
+        "<br>기록: " + finishSeconds.toFixed(2) + "초<br>최고 점수: " + loadBest(TRACK_INDEX);
+    } else {
+      hud.resultTitle.textContent = "GAME OVER";
+      hud.resultTitle.style.color = "#ff4d4d";
+      hud.resultLines.innerHTML = "지각! 결석 처리되었어요<br>최종 점수: " + score +
+        "<br>강의실까지 " + Math.floor(chairS / TRACK_LENGTH * 100) + "% 왔어요<br>최고 점수: " + loadBest(TRACK_INDEX);
+    }
+  }
+}
+
+// ===== 게임 루프: 계산 → 3D 그리기 → 글자 → 다음 프레임 예약 =====
+// 계산(updateGame)은 화면 속도와 상관없이 실제 시간으로 1초에 60번 한다
+// 3D는 무거워서 화면이 30번밖에 못 그리면 계산을 두 번씩, 120Hz 모니터면 두 번에 한 번씩 한다
+// 그래서 어느 컴퓨터에서든 의자 속도가 같다 (2D 버전은 화면 한 번 = 계산 한 번)
+const STEP_MS = 1000 / 60;   // 계산 한 번이 맡는 시간
+let lastFrameTime = performance.now();
+let pendingMs = 0;           // 아직 계산하지 않고 밀린 시간
+function gameLoop(now) {
+  pendingMs = pendingMs + Math.min(now - lastFrameTime, 250);   // 탭을 오래 비웠다 돌아와도 한꺼번에 몰아서 계산하지 않게
+  lastFrameTime = now;
+  // 카운트다운 중에는 시간만 잰다 (아무것도 움직이지 않는다)
+  if (gameState === "countdown") {
+    updateCountdown();
+  }
+  while (pendingMs >= STEP_MS) {
+    if (gameState === "playing") {
+      checkStartBoost();
+      updateGame();
+    }
+    updateCamera();   // 카메라 각도 (8장: 스턴 중엔 안 돌고, 드리프트 중엔 덜 돌고, 한 번에 최대 CAMERA_MAX_TURN)
+    pendingMs = pendingMs - STEP_MS;
+  }
+  render3D();
+  updateHud();
+  requestAnimationFrame(gameLoop);
+}
+
+if (gameState === "countdown") startCountdown();   // 트랙을 골라 들어왔으면 3, 2, 1 카운트다운부터
+cameraAngle = chairAngle;
+requestAnimationFrame(gameLoop);
+
+
+// =====================================================================
+// ===== 여기부터는 2D 버전(my-game/script.js)에서 그대로 가져온 게임 규칙 =====
+// =====================================================================
 
 // ===== 계산: 한 프레임만큼 게임 상태(숫자)를 바꾼다 (gameState가 "playing"일 때만 불린다) =====
 function updateGame() {
@@ -778,7 +1708,7 @@ function updateGame() {
   // 번아웃 중에는 뒷바퀴에서 연기가 난다 (세 프레임에 한 번꼴, 힘이 모일수록 조금 더 크게)
   if (isBurnout && Math.random() < 0.35) {
     const wheel = getRearWheels()[Math.floor(Math.random() * 2)];
-    smokes.push({ x: wheel.x, y: wheel.y, size: 2 + burnoutCharge * 2, life: SMOKE_LIFE });
+    smokes.push({ x: wheel.x, y: wheel.y, size: 2 + burnoutCharge * 2, life: SMOKE_LIFE, h: chairElevation });
   }
 
   // 역주행 검사: 의자 속도를 트랙 진행 방향으로 나눠 본다 (내적: 양수 = 앞으로, 음수 = 거꾸로)
@@ -796,7 +1726,7 @@ function updateGame() {
     if (lastWheels !== null) {
       // 직전 바퀴 위치 → 지금 바퀴 위치를 잇는 짧은 선을 바퀴마다 하나씩 남긴다 (고가 위 자국인지도 기억)
       for (let i = 0; i < 2; i++) {
-        skidMarks.push({ x1: lastWheels[i].x, y1: lastWheels[i].y, x2: wheels[i].x, y2: wheels[i].y, life: SKID_LIFE, bridge: chairOnBridge });
+        skidMarks.push({ x1: lastWheels[i].x, y1: lastWheels[i].y, x2: wheels[i].x, y2: wheels[i].y, life: SKID_LIFE, bridge: chairOnBridge, h: chairElevation });
       }
     }
     lastWheels = wheels;
@@ -804,7 +1734,7 @@ function updateGame() {
     // 두 프레임에 한 번꼴로 바퀴 한쪽에서 연기를 피운다
     if (Math.random() < 0.5) {
       const wheel = wheels[Math.floor(Math.random() * 2)];
-      smokes.push({ x: wheel.x, y: wheel.y, size: 6, life: SMOKE_LIFE });
+      smokes.push({ x: wheel.x, y: wheel.y, size: 6, life: SMOKE_LIFE, h: chairElevation });
     }
   } else {
     lastWheels = null;   // 드리프트가 끊기면 다음 자국은 새로 시작한다 (멀리 떨어진 곳끼리 잇지 않게)
@@ -982,355 +1912,6 @@ function resetGame() {
   lastLapSeconds = 0;
   nextLevelUp = LEVEL_UP_SECONDS;
   startCountdown();   // 바로 달리지 않고 3, 2, 1 카운트다운부터
-}
-
-// ===== 소리 장치 켜기: 키를 누를 때마다 불린다 (이미 켜져 있으면 아무것도 안 한다) =====
-function unlockAudio() {
-  try {
-    if (!audioCtx) {
-      const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-      if (!AudioContextClass) return;   // 소리를 못 내는 브라우저면 소리 없이
-      audioCtx = new AudioContextClass();
-    }
-    if (audioCtx.state === "suspended") audioCtx.resume();
-  } catch (e) {
-    audioCtx = null;   // 소리 장치를 못 만들어도 게임은 계속
-  }
-}
-
-// ===== 삑 소리 하나: freq(높이, Hz)에서 시작해 endFreq로 미끄러지며 ms 동안, volume으로 =====
-// type: "sine"(부드럽게) / "square"(삑삑) / "sawtooth"(지잉) / "triangle"(통통)
-// delay만큼 늦게 시작한다 (멜로디를 만들 때)
-function playTone(freq, endFreq, ms, type, volume, delay) {
-  const start = audioCtx.currentTime + (delay || 0) / 1000;
-  const end = start + ms / 1000;
-  const osc = audioCtx.createOscillator();
-  const gain = audioCtx.createGain();
-  osc.type = type;
-  osc.frequency.setValueAtTime(freq, start);
-  osc.frequency.exponentialRampToValueAtTime(endFreq, end);
-  gain.gain.setValueAtTime(volume * SOUND_VOLUME, start);
-  gain.gain.exponentialRampToValueAtTime(0.001, end);   // 점점 작아지며 끝난다 (뚝 끊기는 소리 없이)
-  osc.connect(gain);
-  gain.connect(audioCtx.destination);
-  osc.start(start);
-  osc.stop(end);
-}
-
-// ===== 치익 소리: 무작위 잡음 (부딪히는 소리) =====
-function playNoise(ms, volume) {
-  const length = Math.floor(audioCtx.sampleRate * ms / 1000);
-  const buffer = audioCtx.createBuffer(1, length, audioCtx.sampleRate);
-  const data = buffer.getChannelData(0);
-  for (let i = 0; i < length; i++) {
-    data[i] = (Math.random() * 2 - 1) * (1 - i / length);   // 뒤로 갈수록 작게
-  }
-  const source = audioCtx.createBufferSource();
-  const gain = audioCtx.createGain();
-  gain.gain.value = volume * SOUND_VOLUME;
-  source.buffer = buffer;
-  source.connect(gain);
-  gain.connect(audioCtx.destination);
-  source.start();
-}
-
-// ===== 효과음 재생: 이름으로 부른다. 음소거거나 소리 장치가 없으면 조용히 넘어간다 =====
-// 소리마다 새로 만들어서 재생하니까, 빠르게 연달아 나도 끊기지 않고 겹쳐서 난다
-function playSound(name) {
-  if (isMuted || !audioCtx) return;
-  try {
-    if (name === "count") playTone(440, 440, 150, "square", 0.5);         // 3, 2, 1: 짧은 삑
-    if (name === "go") playTone(880, 880, 400, "square", 0.5);            // GO!: 높고 긴 삑
-    if (name === "bump") playTone(260, 120, 120, "triangle", 0.9);        // 학생·콘: 통
-    if (name === "crash") {                                               // 자동차: 쾅
-      playNoise(300, 0.8);
-      playTone(150, 50, 300, "sawtooth", 0.6);
-    }
-    if (name === "boost") playTone(200, 900, 450, "sawtooth", 0.35);      // 부스터: 지이잉 올라가는 소리
-    if (name === "finish" || name === "record") {                        // 도착: 도-미-솔-도
-      const notes = [523, 659, 784, 1047];
-      for (let i = 0; i < notes.length; i++) {
-        playTone(notes[i], notes[i], 180, "triangle", 0.7, i * 120);
-      }
-      if (name === "record") playTone(1319, 1319, 400, "triangle", 0.7, 520);   // 신기록이면 한 음 더
-    }
-    if (name === "gameover") {                                            // 시간 초과: 내려가는 음
-      playTone(392, 392, 250, "square", 0.4);
-      playTone(330, 330, 250, "square", 0.4, 250);
-      playTone(262, 196, 500, "square", 0.4, 500);
-    }
-  } catch (e) {
-    // 소리에 문제가 생겨도 게임은 멈추지 않게
-  }
-}
-
-// ===== 음소거 상태 저장·불러오기 (브라우저에 저장) =====
-function loadMuted() {
-  try {
-    return localStorage.getItem("chairDrift.muted") === "true";   // 저장된 건 글자라서 "true"와 비교한다
-  } catch (e) {
-    return false;
-  }
-}
-function saveMuted(value) {
-  try {
-    localStorage.setItem("chairDrift.muted", String(value));
-  } catch (e) {
-    // 저장소를 못 쓰면 저장만 건너뛴다
-  }
-}
-
-// ===== 카메라가 따라갈 방향 (0 = 맵 위쪽) =====
-// 평소: 의자가 바라보는 방향
-// 드리프트 중: 바라보는 방향과 실제로 미끄러져 가는 방향의 가운데 (의자가 확 틀어져도 화면이 덜 휘둘린다)
-// 스턴 중: 지금 화면 방향 그대로 (빙글 도는 의자를 따라 화면이 돌면 제일 어지럽다)
-function cameraTargetAngle() {
-  if (stunTimer > 0) return cameraAngle;
-  const speed = Math.hypot(chairVX, chairVY);
-  if (isDrifting && speed > DRIFT_MIN_SPEED) {
-    const moveAngle = Math.atan2(chairVX, -chairVY);   // 실제로 움직이는 방향
-    return chairAngle + angleDiff(moveAngle, chairAngle) * CAMERA_DRIFT_BLEND;
-  }
-  return chairAngle;
-}
-
-// ===== 카메라 돌리기 (매 프레임): 목표 방향 쪽으로 차이의 일부만, 그것도 최대 CAMERA_MAX_TURN까지만 =====
-// 한 번에 다 돌지 않으니 부드럽고, 최대치가 있으니 의자가 휙 돌아도 화면은 천천히 따라온다
-function updateCamera() {
-  const turn = angleDiff(cameraTargetAngle(), cameraAngle) * CAMERA_TURN_FOLLOW;
-  cameraAngle = cameraAngle + Math.max(-CAMERA_MAX_TURN, Math.min(CAMERA_MAX_TURN, turn));
-}
-
-// ===== 연습 서킷 랩 재기 (달리는 중 매 프레임) =====
-function updateLaps() {
-  // 이번 프레임에 트랙을 따라 간 거리. 끝 → 처음으로 넘어가면 숫자가 확 바뀌니 한 바퀴만큼 보정한다
-  let delta = chairS - lapLastS;
-  if (delta > TRACK_LENGTH / 2) delta = delta - TRACK_LENGTH;
-  if (delta < -TRACK_LENGTH / 2) delta = delta + TRACK_LENGTH;
-  lapLastS = chairS;
-  lapDistance = lapDistance + delta;
-
-  // 출발선을 지나 한 바퀴를 채울 때마다 1랩
-  const done = lapDistance >= LAP_LINE_OFFSET ? Math.floor((lapDistance - LAP_LINE_OFFSET) / TRACK_LENGTH) : 0;
-  if (done > lapsDone) {
-    lapsDone = done;
-    lastLapSeconds = (Date.now() - lapStartTime) / 1000;
-    lapStartTime = Date.now();
-    const record = saveBestLap(TRACK_INDEX, lastLapSeconds);
-    launchText = record ? "랩 신기록! " + lastLapSeconds.toFixed(2) + "초" : "랩 " + lastLapSeconds.toFixed(2) + "초";
-    launchMessageTimer = 90;
-    playSound(record ? "record" : "finish");
-  }
-}
-
-// ===== 연습 서킷 최고 랩 (브라우저에 저장, 짧을수록 좋다) =====
-function loadBestLap(index) {
-  try {
-    return Number(localStorage.getItem("chairDrift.bestLap." + index)) || 0;   // 없으면 0
-  } catch (e) {
-    return 0;
-  }
-}
-// 더 짧은 기록이면 저장하고 true를 돌려준다
-function saveBestLap(index, seconds) {
-  const best = loadBestLap(index);
-  if (best > 0 && seconds >= best) return false;
-  try {
-    localStorage.setItem("chairDrift.bestLap." + index, seconds.toFixed(2));
-  } catch (e) {
-    // 저장소를 못 쓰면 저장만 건너뛴다
-  }
-  return true;
-}
-
-// ===== 시계 밀기: 멈춰 있던 시간(ms)만큼 시작 시각들을 뒤로 → 멈춘 동안 시간이 안 흐른 것처럼 =====
-// 탭을 숨겼다 돌아올 때와 일시 정지에서 계속할 때 쓴다
-function shiftClocks(ms) {
-  startTime = startTime + ms;           // 제한 시간
-  countdownStart = countdownStart + ms; // 3, 2, 1 카운트다운
-  goTime = goTime + ms;                 // GO! 글자와 출발 부스터 판정
-  lapStartTime = lapStartTime + ms;     // 연습 서킷 랩 시계
-  if (upPressTime !== 0) upPressTime = upPressTime + ms;
-}
-
-// ===== 일시 정지 / 계속 / 메뉴 고르기 =====
-function pauseGame() {
-  pausedFrom = gameState;
-  gameState = "paused";
-  pausedAt = Date.now();
-  pauseIndex = 0;
-  for (const key in keys) {
-    keys[key] = false;   // 누르고 있던 키는 뗀 것으로 (계속했을 때 혼자 달려 나가지 않게)
-  }
-}
-function resumeGame() {
-  shiftClocks(Date.now() - pausedAt);
-  gameState = pausedFrom;
-}
-function choosePauseOption() {
-  if (pauseIndex === 0) {
-    resumeGame();
-  } else if (pauseIndex === 1) {
-    resetGame();             // 처음부터 다시 (3, 2, 1부터)
-  } else {
-    menuIndex = TRACK_INDEX;
-    gameState = "select";
-  }
-}
-
-// ===== 일시 정지 메뉴 그리기 (화면 좌표) =====
-function drawPauseMenu() {
-  ctx.fillStyle = "rgba(0, 0, 0, 0.7)";
-  ctx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  ctx.fillStyle = "#ffffff";
-  ctx.font = "bold 44px sans-serif";
-  ctx.fillText("일시 정지", SCREEN_WIDTH / 2, 170);
-  for (let i = 0; i < PAUSE_OPTIONS.length; i++) {
-    const y = 260 + i * 60;
-    const selected = i === pauseIndex;
-    ctx.fillStyle = selected ? "rgba(255, 216, 77, 0.2)" : "rgba(255, 255, 255, 0.06)";
-    ctx.fillRect(SCREEN_WIDTH / 2 - 150, y - 24, 300, 48);
-    if (selected) {
-      ctx.strokeStyle = "#ffd84d";
-      ctx.lineWidth = 3;
-      ctx.strokeRect(SCREEN_WIDTH / 2 - 150, y - 24, 300, 48);
-    }
-    ctx.fillStyle = selected ? "#ffd84d" : "#ffffff";
-    ctx.font = "bold 22px sans-serif";
-    ctx.fillText(PAUSE_OPTIONS[i], SCREEN_WIDTH / 2, y);
-  }
-  ctx.fillStyle = "#aaaaaa";
-  ctx.font = "15px sans-serif";
-  ctx.fillText("↑↓ 고르기 · Enter 확인 · Esc 계속", SCREEN_WIDTH / 2, 470);
-}
-
-// ===== 트랙 고르기 =====
-// 주소 뒤의 ?track=번호를 읽는다. 없거나 이상하면 1번(보통)
-function readTrackIndex() {
-  const params = new URLSearchParams(location.search);
-  if (!params.has("track")) return 1;   // 주소에 없으면 Number(null)이 0이 되니까 먼저 확인한다
-  const n = Number(params.get("track"));
-  if (Number.isInteger(n) && n >= 0 && n < TRACKS.length) return n;
-  return 1;
-}
-
-// 선택한 트랙으로 출발한다. 지금 트랙이면 그대로 다시 시작하고,
-// 다른 트랙이면 그 트랙 번호를 주소에 붙여 페이지를 다시 불러온다
-// (길·나무·장애물은 시작할 때 한 번 만들기 때문에, 다시 불러오는 게 가장 깔끔하다)
-function chooseTrack(index) {
-  if (index === TRACK_INDEX) {
-    resetGame();
-  } else {
-    location.search = "?track=" + index;
-  }
-}
-
-// ===== 트랙별 최고 점수 (브라우저에 저장, 새로고침해도 남는다) =====
-function loadBest(index) {
-  try {
-    return Number(localStorage.getItem("chairDrift.best." + index)) || 0;
-  } catch (e) {
-    return 0;   // 저장소를 못 쓰는 환경이면 기록 없이
-  }
-}
-
-// 더 높은 점수면 저장하고 true를 돌려준다
-function saveBest(index, value) {
-  if (value <= loadBest(index)) return false;
-  try {
-    localStorage.setItem("chairDrift.best." + index, String(value));
-  } catch (e) {
-    // 저장소를 못 쓰면 저장만 건너뛴다
-  }
-  return true;
-}
-
-// ===== 트랙 미리보기: 꼭짓점을 이어 작은 지도로 그린다 (g = 2D 붓) =====
-function drawTrackPreview(g, points, x, y, width, height, color) {
-  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-  for (const p of points) {
-    minX = Math.min(minX, p.x);
-    maxX = Math.max(maxX, p.x);
-    minY = Math.min(minY, p.y);
-    maxY = Math.max(maxY, p.y);
-  }
-  const scale = Math.min(width / (maxX - minX || 1), height / (maxY - minY || 1)) * 0.85;
-  const offsetX = x + (width - (maxX - minX) * scale) / 2;
-  const offsetY = y + (height - (maxY - minY) * scale) / 2;
-  g.strokeStyle = color;
-  g.lineWidth = 4;
-  g.lineJoin = "round";
-  g.beginPath();
-  for (let i = 0; i < points.length; i++) {
-    const px = offsetX + (points[i].x - minX) * scale;
-    const py = offsetY + (points[i].y - minY) * scale;
-    if (i === 0) g.moveTo(px, py);
-    else g.lineTo(px, py);
-  }
-  g.stroke();
-  // 출발: 빨간 점, 결승(강의실): 노란 점
-  const first = points[0];
-  const last = points[points.length - 1];
-  g.fillStyle = "#ff4d4d";
-  g.beginPath();
-  g.arc(offsetX + (first.x - minX) * scale, offsetY + (first.y - minY) * scale, 5, 0, Math.PI * 2);
-  g.fill();
-  g.fillStyle = "#ffd84d";
-  g.beginPath();
-  g.arc(offsetX + (last.x - minX) * scale, offsetY + (last.y - minY) * scale, 5, 0, Math.PI * 2);
-  g.fill();
-}
-
-// ===== 카운트다운 시작: 3, 2, 1, GO! 가 끝나야 달릴 수 있다 =====
-function startCountdown() {
-  gameState = "countdown";
-  isNewRecord = false;
-  countdownStart = Date.now();
-  upPressTime = 0;
-  startBoostChecked = false;
-  lastCountBeep = 0;
-}
-
-// ===== 카운트다운 중 매 프레임: 3초가 지나면 GO! (그때부터 제한 시간이 흐른다) =====
-function updateCountdown() {
-  // 숫자가 바뀔 때마다 한 번씩 삑 (3, 2, 1)
-  const count = Math.ceil((COUNTDOWN_MS - (Date.now() - countdownStart)) / 1000);
-  if (count > 0 && count !== lastCountBeep) {
-    lastCountBeep = count;
-    playSound("count");
-  }
-  if (Date.now() - countdownStart >= COUNTDOWN_MS) {
-    gameState = "playing";
-    goTime = Date.now();
-    startTime = goTime;
-    lapStartTime = goTime;   // 연습 서킷 첫 바퀴 시계
-    playSound("go");
-  }
-}
-
-// ===== 출발 부스터 판정 (GO! 직후 잠깐 동안, 달리는 중 매 프레임) =====
-// ↑를 새로 누른 시각이 GO! 0.3초 전 ~ 0.25초 후 사이면 성공. 판정은 한 판에 한 번만
-function checkStartBoost() {
-  if (startBoostChecked) return;
-  const inWindow = upPressTime >= goTime - START_BOOST_EARLY_MS && upPressTime <= goTime + START_BOOST_LATE_MS;
-  if (upPressTime !== 0 && inWindow) {
-    boostTimer = START_BOOST_FRAMES;
-    playSound("boost");
-    chairVX = Math.sin(chairAngle) * CHAIR_SPEED;   // 바로 튀어 나가게 속도를 준다
-    chairVY = -Math.cos(chairAngle) * CHAIR_SPEED;
-    launchText = "출발 부스터!";
-    launchMessageTimer = 60;
-    startBoostChecked = true;
-  } else if (Date.now() > goTime + START_BOOST_LATE_MS) {
-    // 기회가 지나갔다. GO! 전에 미리 눌러서 계속 누르고 있었다면 "너무 빨랐어요"
-    if (upPressTime !== 0 && upPressTime < goTime - START_BOOST_EARLY_MS) {
-      launchText = "너무 빨랐어요";
-      launchMessageTimer = 60;
-    }
-    startBoostChecked = true;
-  }
 }
 
 // ===== 트랙 만들기: TRACK_POINTS를 TRACK_STEP 간격의 점들로 나눈다 (시작할 때 한 번) =====
@@ -1527,186 +2108,6 @@ function isNearBridge(x, y, margin) {
   return false;
 }
 
-// ===== 이 위치가 의자 근처(화면에 보일 수 있는 범위)인가 =====
-function isNearChair(x, y, margin) {
-  const cx = chairX + CHAIR_SIZE / 2;
-  const cy = chairY + CHAIR_SIZE / 2;
-  return Math.abs(x - cx) < VIEW_RADIUS + margin && Math.abs(y - cy) < VIEW_RADIUS + margin;
-}
-
-// ===== 트랙 길 모양(경로) 만들기: 의자 근처의 땅 위(또는 고가) 부분만 =====
-// 굵은 선으로 칠하면 길이 된다. 땅 길은 고가와 만나는 이음매가 벌어지지 않게 한 점씩 더 이어 그린다
-function traceTrack(bridgeLevel) {
-  ctx.beginPath();
-  let drawing = false;   // 지금 선을 잇는 중인가 (끊겼으면 moveTo로 새로 시작)
-  for (let i = 0; i < trackSamples.length; i++) {
-    const p = trackSamples[i];
-    let inLevel = p.bridge === bridgeLevel;
-    if (!bridgeLevel) {
-      const prev = trackSamples[Math.max(0, i - 1)];
-      const next = trackSamples[Math.min(trackSamples.length - 1, i + 1)];
-      inLevel = inLevel || prev.bridge === false || next.bridge === false;
-    }
-    if (inLevel && isNearChair(p.x, p.y, ROAD_HALF + SIDEWALK_WIDTH)) {
-      if (drawing) ctx.lineTo(p.x, p.y);
-      else ctx.moveTo(p.x, p.y);
-      drawing = true;
-    } else {
-      drawing = false;
-    }
-  }
-}
-
-// ===== 도로 그리기 (땅 위 또는 고가) =====
-// 같은 길 모양을 굵은 선부터 가는 선 순서로 겹쳐 칠한다: 인도 → 차도 → 흰 실선 → 다시 차도
-// 그러면 흰 실선만 차도 가장자리에 가늘게 남는다
-function drawRoad(bridgeLevel) {
-  ctx.lineJoin = "round";
-  ctx.lineCap = "butt";
-
-  if (bridgeLevel) {
-    // 고가 그림자: 오른쪽 아래로 비켜서 반투명하게 → 떠 있어 보인다
-    ctx.save();
-    ctx.translate(BRIDGE_SHADOW, BRIDGE_SHADOW);
-    traceTrack(true);
-    ctx.strokeStyle = "rgba(0, 0, 0, 0.3)";
-    ctx.lineWidth = (ROAD_HALF + SIDEWALK_WIDTH) * 2;
-    ctx.stroke();
-    ctx.restore();
-
-  }
-
-  // 가드레일: 인도보다 조금 넓은 진한 회색 테두리 (땅 위 길과 고가 모두)
-  traceTrack(bridgeLevel);
-  ctx.strokeStyle = "#6b6b6b";
-  ctx.lineWidth = (ROAD_HALF + SIDEWALK_WIDTH + RAIL_WIDTH) * 2;
-  ctx.stroke();
-
-  traceTrack(bridgeLevel);
-  ctx.strokeStyle = "#bfbfbf";                    // 인도
-  ctx.lineWidth = (ROAD_HALF + SIDEWALK_WIDTH) * 2;
-  ctx.stroke();
-  ctx.strokeStyle = "#4d4d4d";                    // 차도
-  ctx.lineWidth = ROAD_HALF * 2;
-  ctx.stroke();
-  ctx.strokeStyle = "#ffffff";                    // 흰 실선 (차도 끝에서 6~10픽셀 안쪽)
-  ctx.lineWidth = (ROAD_HALF - 6) * 2;
-  ctx.stroke();
-  ctx.strokeStyle = "#4d4d4d";
-  ctx.lineWidth = (ROAD_HALF - 10) * 2;
-  ctx.stroke();
-
-  // 보도블록 줄 (40마다) 과 가운데 노란 점선 (50마다 30 길이): 트랙 방향에 맞춰 긋는다
-  ctx.lineWidth = 1;
-  ctx.strokeStyle = "#a6a6a6";
-  for (let s = 0; s < TRACK_LENGTH; s += 40) {
-    const p = pointAt(s);
-    if (p.bridge !== bridgeLevel || !isNearChair(p.x, p.y, ROAD_HALF + SIDEWALK_WIDTH)) continue;
-    // 진행 방향에 수직인 방향(옆 방향)으로 인도 폭만큼 긋는다
-    const sideX = -p.ty;
-    const sideY = p.tx;
-    ctx.beginPath();
-    ctx.moveTo(p.x + sideX * ROAD_HALF, p.y + sideY * ROAD_HALF);
-    ctx.lineTo(p.x + sideX * (ROAD_HALF + SIDEWALK_WIDTH), p.y + sideY * (ROAD_HALF + SIDEWALK_WIDTH));
-    ctx.moveTo(p.x - sideX * ROAD_HALF, p.y - sideY * ROAD_HALF);
-    ctx.lineTo(p.x - sideX * (ROAD_HALF + SIDEWALK_WIDTH), p.y - sideY * (ROAD_HALF + SIDEWALK_WIDTH));
-    ctx.stroke();
-  }
-
-  ctx.lineWidth = 4;
-  ctx.strokeStyle = "#f2c200";
-  for (let s = START_LINE_S + 40; s < TRACK_LENGTH - 200; s += 50) {
-    const p = pointAt(s);
-    if (p.bridge !== bridgeLevel || !isNearChair(p.x, p.y, 50)) continue;
-    const q = pointAt(s + 30);
-    ctx.beginPath();
-    ctx.moveTo(p.x, p.y);
-    ctx.lineTo(q.x, q.y);
-    ctx.stroke();
-  }
-}
-
-// ===== 트랙을 가로지르는 그림 그리기 (출발선, 횡단보도) =====
-// 트랙 거리 s 지점으로 붓을 옮기고 진행 방향으로 돌린 뒤 drawFn을 부른다
-// drawFn 안에서는 x가 길 가로 방향(-ROAD_HALF ~ ROAD_HALF), y가 진행 방향(음수 = 앞)이다
-function drawAcrossRoad(s, drawFn) {
-  const p = pointAt(s);
-  if (!isNearChair(p.x, p.y, ROAD_HALF)) return;
-  ctx.save();
-  ctx.translate(p.x, p.y);
-  ctx.rotate(Math.atan2(p.tx, -p.ty));
-  drawFn();
-  ctx.restore();
-}
-
-// ===== 스키드 마크 그리기 (땅 위 자국 또는 고가 위 자국) =====
-// 남은 수명(life)이 적을수록 투명하게 그려서 서서히 사라지게 한다
-function drawSkidMarks(bridgeLevel) {
-  ctx.lineWidth = SKID_WIDTH;
-  ctx.lineCap = "round";
-  for (const mark of skidMarks) {
-    if (mark.bridge !== bridgeLevel) continue;
-    ctx.strokeStyle = "rgba(20, 20, 20, " + (0.45 * mark.life / SKID_LIFE) + ")";
-    ctx.beginPath();
-    ctx.moveTo(mark.x1, mark.y1);
-    ctx.lineTo(mark.x2, mark.y2);
-    ctx.stroke();
-  }
-  ctx.lineCap = "butt";   // 다른 선 그리기에 영향이 없게 원래대로
-}
-
-// ===== 플레이어 의자 그리기: 바라보는 방향(chairAngle)으로 돌려서 =====
-function drawChair() {
-  ctx.save();
-  // 무적 시간에는 깜빡인다 (5프레임마다 반투명 ↔ 불투명)
-  if (hitCooldown > 0 && Math.floor(hitCooldown / 5) % 2 === 0) {
-    ctx.globalAlpha = 0.35;
-  }
-  ctx.translate(chairX + CHAIR_SIZE / 2, chairY + CHAIR_SIZE / 2);   // 의자 중심으로 붓을 옮긴다
-  // 번아웃 중에는 부르르 떤다
-  const shake = isBurnout ? (Math.random() - 0.5) * 0.15 : 0;
-  ctx.rotate(chairAngle + shake);
-  // 부스터 불꽃: 의자 뒤(그림의 아래쪽)로 뿜어져 나오는 주황·노랑 삼각형. 길이가 떨려서 타오르는 것처럼 보인다
-  if (boostTimer > 0) {
-    const flame = 22 + Math.random() * 14;
-    ctx.fillStyle = "#ff7a1a";
-    ctx.beginPath();
-    ctx.moveTo(-9, CHAIR_SIZE / 2 - 4);
-    ctx.lineTo(9, CHAIR_SIZE / 2 - 4);
-    ctx.lineTo(0, CHAIR_SIZE / 2 - 4 + flame);
-    ctx.closePath();
-    ctx.fill();
-    ctx.fillStyle = "#fff2a0";
-    ctx.beginPath();
-    ctx.moveTo(-4, CHAIR_SIZE / 2 - 4);
-    ctx.lineTo(4, CHAIR_SIZE / 2 - 4);
-    ctx.lineTo(0, CHAIR_SIZE / 2 - 4 + flame * 0.55);
-    ctx.closePath();
-    ctx.fill();
-  }
-  ctx.drawImage(chairImage, -CHAIR_SIZE / 2, -CHAIR_SIZE / 2, CHAIR_SIZE, CHAIR_SIZE);
-  ctx.restore();
-}
-
-// ===== 자동차 그리기 =====
-// s: 트랙 거리 / lane: 1 = 진행 방향 오른쪽 차선, -1 = 왼쪽 차선 / forward: 트랙 방향으로 가는 차인가
-// bridgeLevel: 지금 그리는 층 (그 층에 있는 차만 그린다)
-function drawCar(s, lane, forward, bridgeLevel) {
-  const pose = carPose(s, lane, forward);
-  if (pose.bridge !== bridgeLevel) return;
-  if (!isNearChair(pose.x, pose.y, CAR_HEIGHT)) return;
-
-  // save → 자동차 중심으로 붓을 옮기고 돌린다 → 그린다 → restore로 붓을 원래대로
-  ctx.save();
-  ctx.translate(pose.x, pose.y);
-  ctx.rotate(pose.angle);
-  // 돌린 붓 안에서는 자동차 앞이 항상 위쪽이라, 전조등은 앞 범퍼(-CAR_HEIGHT / 2)에서 위로(-1) 뻗는다
-  // 자동차보다 먼저 그려서 빛이 차 밑에서 앞으로 뻗어 나오는 것처럼 보이게 한다
-  drawHeadlights(0, -CAR_HEIGHT / 2, -1);
-  ctx.drawImage(carImage, -CAR_WIDTH / 2, -CAR_HEIGHT / 2, CAR_WIDTH, CAR_HEIGHT);
-  ctx.restore();
-}
-
 // ===== 자동차의 자리와 방향 =====
 // 그리기와 충돌 판정이 같은 계산을 써야 그림과 판정 영역이 어긋나지 않는다
 // s: 트랙 거리 / lane: 1 = 진행 방향 오른쪽 차선, -1 = 왼쪽 차선 / forward: 트랙 방향으로 가는 차인가
@@ -1829,213 +2230,6 @@ function getObstacleHitboxes() {
     boxes.push(box);
   }
   return boxes;
-}
-
-// ===== 강의실 건물과 문 그리기 (맵 좌표, 결승 지점 위) =====
-function drawClassroom() {
-  // ----- 10. 강의실 건물 (결승 지점 위) -----
-  // 화면이 돌면 맵 끝 바깥과 건물 뒤쪽도 보이므로, 건물을 바깥까지 넉넉히 칠한다
-  ctx.fillStyle = "#9c4a3a";
-  ctx.fillRect(WORLD_LEFT - VIEW_RADIUS, WORLD_TOP - VIEW_RADIUS * 2, WORLD_RIGHT - WORLD_LEFT + VIEW_RADIUS * 2, VIEW_RADIUS * 2);
-
-  // 건물 지붕 끝선: 아래쪽에 진한 띠
-  ctx.fillStyle = "#6e2f24";
-  ctx.fillRect(WORLD_LEFT - VIEW_RADIUS, WORLD_TOP - 8, WORLD_RIGHT - WORLD_LEFT + VIEW_RADIUS * 2, 8);
-
-  // 창문: 하늘색 사각형을 일정한 간격으로 (문 자리는 비운다)
-  ctx.fillStyle = "#a8dadc";
-  for (let x = WORLD_LEFT + 30; x < WORLD_RIGHT; x += 90) {
-    if (x > DOOR_X - 60 && x < DOOR_X + DOOR_WIDTH) {
-      continue;   // 문이 있는 자리에는 창문을 그리지 않는다
-    }
-    ctx.fillRect(x, WORLD_TOP - 45, 50, 26);
-  }
-
-  // ----- 11. 강의실 문 (도착 지점) -----
-  // [새로 시도] 그라데이션: 위는 진한 노랑, 아래는 밝은 노랑
-  const doorGradient = ctx.createLinearGradient(0, DOOR_Y, 0, DOOR_Y + DOOR_HEIGHT);
-  doorGradient.addColorStop(0, "#e6b800");
-  doorGradient.addColorStop(1, "#ffe066");
-  ctx.fillStyle = doorGradient;
-  ctx.fillRect(DOOR_X, DOOR_Y, DOOR_WIDTH, DOOR_HEIGHT);
-
-  // 문 위에 "강의실" 글자
-  ctx.fillStyle = "#333333";
-  ctx.font = "bold 20px sans-serif";
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  ctx.fillText("강의실", DOOR_X + DOOR_WIDTH / 2, DOOR_Y + DOOR_HEIGHT / 2);
-}
-
-// ===== 시작 화면 그리기 (화면 좌표, 8장) =====
-// 제목 → 목표 한 줄 → 조작법 → "아무 키나 눌러 시작"(깜빡임). 링크만 받은 사람도 뭘 해야 하는지 알게
-function drawStartScreen() {
-  ctx.fillStyle = "rgba(0, 0, 0, 0.7)";
-  ctx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-
-  // 제목: 노란 글씨에 검은 테두리, 살짝 기울여서 달리는 느낌
-  ctx.font = "bold italic 72px sans-serif";
-  ctx.strokeStyle = "#000000";
-  ctx.lineWidth = 8;
-  ctx.strokeText("Chair Drift", SCREEN_WIDTH / 2, 150);
-  ctx.fillStyle = "#ffd84d";
-  ctx.fillText("Chair Drift", SCREEN_WIDTH / 2, 150);
-  ctx.drawImage(chairImage, SCREEN_WIDTH / 2 - 30, 200, 60, 60);
-
-  // 목표 한 줄
-  ctx.fillStyle = "#ffffff";
-  ctx.font = "bold 22px sans-serif";
-  ctx.fillText("바퀴 달린 의자를 타고 제한 시간 안에 강의실까지!", SCREEN_WIDTH / 2, 300);
-
-  // 조작법
-  ctx.fillStyle = "#cccccc";
-  ctx.font = "17px sans-serif";
-  ctx.fillText("↑↓ 앞뒤 · ←→ 핸들 · Shift 드리프트 · Ctrl 부스터", SCREEN_WIDTH / 2, 350);
-  ctx.fillText("학생·콘에 부딪히면 느려지고, 자동차에 부딪히면 튕겨 나가요", SCREEN_WIDTH / 2, 378);
-  ctx.fillText("Esc 일시 정지 · M 음소거 · 소리는 키를 누른 뒤부터 나요", SCREEN_WIDTH / 2, 406);
-
-  // 시작 안내: 0.5초 켜지고 0.4초 꺼지며 깜빡인다
-  if (Date.now() % 900 < 500) {
-    ctx.fillStyle = "#7CFC00";
-    ctx.font = "bold 24px sans-serif";
-    ctx.fillText("아무 키나 눌러 시작", SCREEN_WIDTH / 2, 480);
-  }
-}
-
-// ===== 트랙 선택 화면 그리기 (화면 좌표) =====
-// 트랙 카드를 가로로 늘어놓고, 고르고 있는 카드는 노란 테두리로 크게
-function drawTrackSelect() {
-  ctx.fillStyle = "rgba(0, 0, 0, 0.75)";
-  ctx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  ctx.fillStyle = "#ffffff";
-  ctx.font = "bold 40px sans-serif";
-  ctx.fillText("트랙 선택", SCREEN_WIDTH / 2, 70);
-
-  const cardWidth = 175;
-  const cardHeight = 330;
-  const gap = 14;
-  const left = (SCREEN_WIDTH - (cardWidth * TRACKS.length + gap * (TRACKS.length - 1))) / 2;
-  for (let i = 0; i < TRACKS.length; i++) {
-    const track = TRACKS[i];
-    const x = left + i * (cardWidth + gap);
-    const y = 120;
-    const selected = i === menuIndex;
-    // 카드 바탕과 테두리
-    ctx.fillStyle = selected ? "rgba(60, 60, 60, 0.95)" : "rgba(30, 30, 30, 0.9)";
-    ctx.fillRect(x, y, cardWidth, cardHeight);
-    ctx.strokeStyle = selected ? "#ffd84d" : "#666666";
-    ctx.lineWidth = selected ? 4 : 2;
-    ctx.strokeRect(x, y, cardWidth, cardHeight);
-    // 이름과 난이도
-    ctx.fillStyle = "#ffffff";
-    ctx.font = "bold 22px sans-serif";
-    ctx.fillText(track.name, x + cardWidth / 2, y + 30);
-    ctx.fillStyle = track.levelColor;
-    ctx.font = "bold 18px sans-serif";
-    ctx.fillText(track.level, x + cardWidth / 2, y + 58);
-    // 작은 지도
-    drawTrackPreview(ctx, track.points, x + 20, y + 75, cardWidth - 40, 160, "#ffffff");
-    // 제한 시간과 최고 점수
-    ctx.fillStyle = "#cccccc";
-    ctx.font = "13px sans-serif";
-    ctx.fillStyle = "#ffd84d";
-    if (track.training) {
-      ctx.fillStyle = "#cccccc";
-      ctx.fillText("장애물 없음 · 계속 돌기", x + cardWidth / 2, y + 265);
-      ctx.fillStyle = "#ffd84d";
-      ctx.font = "bold 15px sans-serif";
-      const bestLap = loadBestLap(i);
-      ctx.fillText(bestLap > 0 ? "최고 랩 " + bestLap.toFixed(2) + "초" : "기록 없음", x + cardWidth / 2, y + 295);
-    } else {
-      ctx.fillStyle = "#cccccc";
-      ctx.fillText("제한 시간 " + track.timeLimit + "초 · 차 " + track.carCount + "대", x + cardWidth / 2, y + 265);
-      ctx.fillStyle = "#ffd84d";
-      ctx.font = "bold 15px sans-serif";
-      const best = loadBest(i);
-      ctx.fillText(best > 0 ? "최고 점수 " + best : "기록 없음", x + cardWidth / 2, y + 295);
-    }
-  }
-
-  ctx.fillStyle = "#ffffff";
-  ctx.font = "bold 18px sans-serif";
-  ctx.fillText("← → 로 고르고  Enter 로 출발  ·  Esc 처음 화면", SCREEN_WIDTH / 2, 500);
-  ctx.fillStyle = "#aaaaaa";
-  ctx.font = "15px sans-serif";
-  ctx.fillText("조작: ↑↓ 앞뒤 · ←→ 핸들 · Shift 드리프트 · Ctrl 부스터", SCREEN_WIDTH / 2, 535);
-}
-
-// ===== 결과 화면 그리기 (화면 좌표) =====
-// 화면을 어둡게 덮고, 가운데에 큰 제목 → 줄마다 결과 → 맨 아래 작게 "R 키를 눌러 다시 시작"
-function drawResultScreen(title, titleColor, lines) {
-  ctx.fillStyle = "rgba(0, 0, 0, 0.65)";
-  ctx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-
-  ctx.fillStyle = titleColor;
-  ctx.font = "bold 56px sans-serif";
-  ctx.fillText(title, SCREEN_WIDTH / 2, 200);
-
-  ctx.fillStyle = "#ffffff";
-  ctx.font = "bold 26px sans-serif";
-  for (let i = 0; i < lines.length; i++) {
-    ctx.fillText(lines[i], SCREEN_WIDTH / 2, 270 + i * 40);
-  }
-
-  ctx.fillStyle = "#cccccc";
-  ctx.font = "18px sans-serif";
-  ctx.fillText("R: 다시 달리기   ·   T: 트랙 선택", SCREEN_WIDTH / 2, 500);
-}
-
-// ===== 미니맵 그리기 (화면 좌표) =====
-// 트랙 전체가 MINIMAP_SIZE 네모 안에 들어가게 줄여서 그린다
-function drawMinimap() {
-  const width = WORLD_RIGHT - WORLD_LEFT;
-  const height = WORLD_BOTTOM - WORLD_TOP;
-  const scale = MINIMAP_SIZE / Math.max(width, height);
-  // 맵 좌표 → 미니맵 좌표 (가운데 정렬)
-  const offsetX = MINIMAP_X + (MINIMAP_SIZE - width * scale) / 2;
-  const offsetY = MINIMAP_Y + (MINIMAP_SIZE - height * scale) / 2;
-  const mapX = function (x) { return offsetX + (x - WORLD_LEFT) * scale; };
-  const mapY = function (y) { return offsetY + (y - WORLD_TOP) * scale; };
-
-  // 반투명 검은 바탕
-  ctx.fillStyle = "rgba(0, 0, 0, 0.5)";
-  ctx.fillRect(MINIMAP_X - 6, MINIMAP_Y - 6, MINIMAP_SIZE + 12, MINIMAP_SIZE + 12);
-
-  // 트랙: 땅 위는 흰색, 고가는 주황색 (4점마다 하나씩만 이어도 충분하다)
-  ctx.lineWidth = 3;
-  ctx.lineJoin = "round";
-  for (const bridgeLevel of [false, true]) {
-    ctx.strokeStyle = bridgeLevel ? "#ff9f1c" : "#ffffff";
-    ctx.beginPath();
-    let drawing = false;
-    for (let i = 0; i < trackSamples.length; i += 4) {
-      const p = trackSamples[i];
-      if (p.bridge === bridgeLevel) {
-        if (drawing) ctx.lineTo(mapX(p.x), mapY(p.y));
-        else ctx.moveTo(mapX(p.x), mapY(p.y));
-        drawing = true;
-      } else {
-        drawing = false;
-      }
-    }
-    ctx.stroke();
-  }
-
-  // 결승(강의실): 노란 점 / 의자: 빨간 점
-  ctx.fillStyle = "#ffd84d";
-  ctx.beginPath();
-  ctx.arc(mapX(FINISH.x), mapY(FINISH.y), 5, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = "#ff4d4d";
-  ctx.beginPath();
-  ctx.arc(mapX(chairX + CHAIR_SIZE / 2), mapY(chairY + CHAIR_SIZE / 2), 4, 0, Math.PI * 2);
-  ctx.fill();
 }
 
 // ===== 맵 꾸미기: 나무·풀·학생·구름 배치 (시작할 때 한 번) =====
@@ -2207,21 +2401,6 @@ function createCrossers() {
   }
 }
 
-// ===== 공사 콘 그리기 (위에서 본 모양): 사각 받침 + 주황 원뿔 + 흰 띠 =====
-function drawCone(x, y) {
-  ctx.fillStyle = "#b34700";                                   // 받침
-  ctx.fillRect(x - CONE_SIZE / 2, y - CONE_SIZE / 2, CONE_SIZE, CONE_SIZE);
-  ctx.fillStyle = "#ff7a00";                                   // 원뿔
-  ctx.beginPath();
-  ctx.arc(x, y, CONE_SIZE * 0.4, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.strokeStyle = "#ffffff";                                 // 반사 띠
-  ctx.lineWidth = 3;
-  ctx.beginPath();
-  ctx.arc(x, y, CONE_SIZE * 0.22, 0, Math.PI * 2);
-  ctx.stroke();
-}
-
 // ===== 각도 차이 계산 =====
 // 각도 a에서 b를 뺀 차이를 -180~180도(-π~π) 사이로 맞춰 준다
 // 예: 350도와 10도의 차이를 340도가 아니라 -20도로 계산해서, 더 가까운 쪽으로 돌게 한다
@@ -2239,8 +2418,8 @@ function getRearWheels() {
   const cos = Math.cos(chairAngle);
   const sin = Math.sin(chairAngle);
   const wheels = [];
-  for (const side of [-14, 14]) {          // 왼쪽 바퀴(-14), 오른쪽 바퀴(14)
-    const back = 22;                       // 뒤쪽(그림의 아래쪽)으로 22
+  for (const side of [-7, 7]) {            // 왼쪽 바퀴(-7), 오른쪽 바퀴(7) (3D 의자 크기에 맞춤)
+    const back = 9;                        // 뒤쪽으로 9
     wheels.push({
       x: centerX + side * cos - back * sin,
       y: centerY + side * sin + back * cos,
@@ -2249,536 +2428,204 @@ function getRearWheels() {
   return wheels;
 }
 
-// ===== 전조등 그리기 =====
-// frontX, frontY: 자동차 앞 범퍼 가운데 위치
-// direction: 1이면 아래로, -1이면 위로 빛이 뻗는다
-function drawHeadlights(frontX, frontY, direction) {
-  // 그라데이션: 등 쪽은 밝은 노랑, 멀어질수록 투명해져서 빛이 퍼지며 사라지는 것처럼 보인다
-  const endY = frontY + direction * HEADLIGHT_LENGTH;
-  const light = ctx.createLinearGradient(0, frontY, 0, endY);
-  light.addColorStop(0, "rgba(255, 245, 170, 0.75)");
-  light.addColorStop(1, "rgba(255, 245, 170, 0)");
-  ctx.fillStyle = light;
-  for (const side of [-1, 1]) {            // 왼쪽 등(-1), 오른쪽 등(1)
-    const lampX = frontX + side * 12;      // 등 위치: 가운데에서 12픽셀 옆
-    ctx.beginPath();
-    ctx.moveTo(lampX - 4, frontY);                                       // 등 쪽은 좁고
-    ctx.lineTo(lampX + 4, frontY);
-    ctx.lineTo(lampX + 12, frontY + direction * HEADLIGHT_LENGTH);       // 멀어질수록 넓게 퍼진다
-    ctx.lineTo(lampX - 12, frontY + direction * HEADLIGHT_LENGTH);
-    ctx.closePath();
-    ctx.fill();
+// =====================================================================
+// ===== 8장: 2D 버전에서 그대로 가져온 함수들 (랩, 일시 정지, 카메라, 소리) =====
+// =====================================================================
+
+// ===== 연습 서킷 랩 재기 (달리는 중 매 프레임) =====
+function updateLaps() {
+  // 이번 프레임에 트랙을 따라 간 거리. 끝 → 처음으로 넘어가면 숫자가 확 바뀌니 한 바퀴만큼 보정한다
+  let delta = chairS - lapLastS;
+  if (delta > TRACK_LENGTH / 2) delta = delta - TRACK_LENGTH;
+  if (delta < -TRACK_LENGTH / 2) delta = delta + TRACK_LENGTH;
+  lapLastS = chairS;
+  lapDistance = lapDistance + delta;
+
+  // 출발선을 지나 한 바퀴를 채울 때마다 1랩
+  const done = lapDistance >= LAP_LINE_OFFSET ? Math.floor((lapDistance - LAP_LINE_OFFSET) / TRACK_LENGTH) : 0;
+  if (done > lapsDone) {
+    lapsDone = done;
+    lastLapSeconds = (Date.now() - lapStartTime) / 1000;
+    lapStartTime = Date.now();
+    const record = saveBestLap(TRACK_INDEX, lastLapSeconds);
+    launchText = record ? "랩 신기록! " + lastLapSeconds.toFixed(2) + "초" : "랩 " + lastLapSeconds.toFixed(2) + "초";
+    launchMessageTimer = 90;
+    playSound(record ? "record" : "finish");
   }
 }
 
-// ============================================================
-// ⑤ 게임 루프: 지우기 → 계산 → 그리기 → 다음 프레임 예약
-// ============================================================
-
-// ===== 게임 루프: 지우기 → 계산 → 그리기 → 다음 프레임 예약 =====
-
-function gameLoop() {
-  // ===== ① 지우기: 이전 프레임 그림을 없앤다 =====
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-  // ===== ② 계산: 상태(숫자)를 바꾼다 =====
-
-  // 카운트다운 중에는 시간만 잰다 (아무것도 움직이지 않는다)
-  if (gameState === "countdown") {
-    updateCountdown();
+// ===== 연습 서킷 최고 랩 (브라우저에 저장, 짧을수록 좋다) =====
+function loadBestLap(index) {
+  try {
+    return Number(localStorage.getItem("chairDrift.bestLap." + index)) || 0;   // 없으면 0
+  } catch (e) {
+    return 0;
   }
-  // 달리는 중일 때만 계산한다. 도착했거나 게임 오버면 모두 멈춘다 (루프는 계속 돌면서 결과 화면을 그린다)
-  if (gameState === "playing") {
-    checkStartBoost();
-    updateGame();
-  }
-  updateCamera();   // 카메라 각도와 높이 (시점을 바꾸면 어느 화면에서든 부드럽게 바뀌게 항상 부른다)
-
-  // ===== ③ 그리기: 바뀐 숫자대로 화면을 그린다 =====
-  const chairCenterX = chairX + CHAIR_SIZE / 2;
-  const chairCenterY = chairY + CHAIR_SIZE / 2;
-
-  // 카메라: 네 단계로 붓을 옮긴다. 아래에서부터 거꾸로 읽으면 이해하기 쉽다
-  //   ④ 의자 중심이 (0, 0)에 오게 맵을 민다
-  //   ③ CAMERA_ZOOM만큼 맵을 작게 줄인다 → 카메라가 멀리서 보는 것처럼 넓게 보인다
-  //   ② 카메라 각도만큼 맵을 반대로 돌린다 → 앞쪽 도로가 향하는 쪽이 화면 위쪽이 된다
-  //   ① (0, 0)을 화면 가운데 아래(의자 자리)로 옮긴다
-  // 여기부터 restore 전까지는 전부 "맵 위의 좌표"로 그린다
-  ctx.save();
-  ctx.translate(SCREEN_WIDTH / 2, CAMERA_ANCHOR_Y);   // ①
-  ctx.rotate(-cameraAngle);                           // ②
-  ctx.scale(CAMERA_ZOOM, CAMERA_ZOOM);                // ③
-  ctx.translate(-chairCenterX, -chairCenterY);        // ④
-
-  // 화면이 돌아가 있어서, 의자 주변 VIEW_RADIUS 안은 어느 방향이든 보일 수 있다
-  const viewLeft = chairCenterX - VIEW_RADIUS;
-  const viewTop = chairCenterY - VIEW_RADIUS;
-
-  // ----- 1. 잔디 (보이는 범위 전체 바닥) -----
-  // [새로 시도] 패턴: 작은 잔디 그림을 타일처럼 반복해서 칠한다. 길은 이 위에 덮어 그린다
-  ctx.fillStyle = ctx.createPattern(grassImage, "repeat");
-  ctx.fillRect(viewLeft, viewTop, VIEW_RADIUS * 2, VIEW_RADIUS * 2);
-
-  // 풀 포기: 포기마다 풀잎 3개. 끝부분이 sin(사인) 물결처럼 좌우로 흔들린다
-  // 포기마다 위치를 더해서 흔들리는 타이밍을 다르게 → 바람이 지나가는 것처럼 보인다
-  ctx.strokeStyle = "#2f7d32";
-  ctx.lineWidth = 2;
-  for (const tuft of grassTufts) {
-    if (!isNearChair(tuft.x, tuft.y, 0)) continue;   // 화면 밖이면 건너뛴다
-    const sway = Math.sin(swayTime + tuft.x * 0.05 + tuft.y * 0.03) * GRASS_SWAY;
-    for (let i = -1; i <= 1; i++) {
-      const rootX = tuft.x + i * 4;                        // 풀잎 뿌리 (4픽셀 간격)
-      const tipX = rootX + i * 3 + sway;                    // 풀잎 끝 (바깥으로 벌어지고 + 흔들림)
-      const tipY = tuft.y - GRASS_BLADE_HEIGHT + Math.abs(i) * 3;   // 가운데 잎이 제일 길다
-      ctx.beginPath();
-      ctx.moveTo(rootX, tuft.y);
-      ctx.quadraticCurveTo(rootX, tuft.y - GRASS_BLADE_HEIGHT / 2, tipX, tipY);   // 살짝 휜 풀잎
-      ctx.stroke();
-    }
-  }
-
-  // ----- 2. 땅 위 도로 (인도 + 차도 + 차선) -----
-  drawRoad(false);
-
-  // ----- 3. 출발선: 체크무늬 띠 -----
-  drawAcrossRoad(START_LINE_S, function () {
-    let col = 0;   // 몇 번째 칸인가 (흰색·검은색을 번갈아 칠하려고 센다)
-    for (let x = -ROAD_HALF; x < ROAD_HALF; x += 20) {
-      for (let row = 0; row < 2; row++) {
-        ctx.fillStyle = (col + row) % 2 === 0 ? "#ffffff" : "#222222";
-        ctx.fillRect(x, -20 + row * 20, 20, 20);
-      }
-      col = col + 1;
-    }
-  });
-
-  // ----- 4. 횡단보도: 강의실 앞, 흰 줄무늬 -----
-  drawAcrossRoad(TRACK_LENGTH - 120, function () {
-    ctx.fillStyle = "#ffffff";
-    for (let x = -ROAD_HALF + 20; x < ROAD_HALF - 20; x += 40) {
-      ctx.fillRect(x, -20, 20, 40);
-    }
-  });
-
-  // 트랙 곳곳의 횡단보도 (학생이 건너는 곳)
-  for (let i = 0; i < crosswalks.length; i++) {
-    drawAcrossRoad(crosswalks[i], function () {
-      ctx.fillStyle = "#ffffff";
-      for (let x = -ROAD_HALF + 20; x < ROAD_HALF - 20; x += 40) {
-        ctx.fillRect(x, -20, 20, 40);
-      }
-    });
-  }
-
-  // ----- 스키드 마크 (땅 위 자국): 땅바닥에 붙은 자국이라 도로 바로 위, 나머지 모든 것 아래에 -----
-  drawSkidMarks(false);
-
-  // ----- 공사 콘 (차도 위): for 반복문으로 전부 그린다 -----
-  for (let i = 0; i < cones.length; i++) {
-    const pos = trackPosition(cones[i].s, cones[i].offset);
-    if (isNearChair(pos.x, pos.y, CONE_SIZE)) drawCone(pos.x, pos.y);
-  }
-
-  // ----- 5. 나무 (잔디 위): 풀과 같은 흔들림 시계로 살짝 기울었다 돌아온다 -----
-  for (const tree of trees) {
-    if (!isNearChair(tree.x, tree.y, TREE_SIZE)) continue;   // 화면 밖이면 건너뛴다
-    const angle = Math.sin(swayTime * 0.8 + tree.y * 0.02) * TREE_SWAY_ANGLE;
-    ctx.save();
-    ctx.translate(tree.x + TREE_SIZE / 2, tree.y + TREE_SIZE / 2);   // 나무 중심으로 붓을 옮긴다
-    ctx.rotate(angle);                                              // 그 자리에서 살짝 돌린다
-    ctx.drawImage(treeImage, -TREE_SIZE / 2, -TREE_SIZE / 2, TREE_SIZE, TREE_SIZE);
-    ctx.restore();
-  }
-
-  // ----- 6. 다른 학생들 (인도 위): 걷는 쪽을 보고, 걸음마다 몸이 좌우로 흔들린다 -----
-  for (const student of students) {
-    const p = pointAt(student.s);
-    const x = p.x - p.ty * student.side * (ROAD_HALF + SIDEWALK_WIDTH / 2);   // 인도 한가운데
-    const y = p.y + p.tx * student.side * (ROAD_HALF + SIDEWALK_WIDTH / 2);
-    if (!isNearChair(x, y, STUDENT_WIDTH)) continue;
-    // 학생 그림은 아래쪽을 보고 있다. 걷는 방향(트랙 방향 또는 그 반대)으로 돌린다
-    let dirX = p.tx;
-    let dirY = p.ty;
-    if (student.speed < 0) {
-      dirX = -dirX;
-      dirY = -dirY;
-    }
-    const facing = Math.atan2(-dirX, dirY);
-    // 걸음 흔들림: s(걸어온 거리)로 계산하므로 걸을 때만 흔들린다
-    const wobble = Math.sin(student.s * 0.3) * STUDENT_WOBBLE;
-
-    ctx.save();
-    ctx.translate(x, y);   // 학생 중심으로 붓을 옮긴다
-    ctx.rotate(facing + wobble);
-    // 중심 기준으로 그리기 위해 가로·세로의 반만큼 빼서 그린다
-    ctx.drawImage(studentImage, -STUDENT_WIDTH / 2, -STUDENT_HEIGHT / 2, STUDENT_WIDTH, STUDENT_HEIGHT);
-    ctx.restore();
-  }
-
-  // 횡단보도를 건너는 학생들: 길을 가로지르는 방향을 보고 걷는다
-  for (let i = 0; i < crossers.length; i++) {
-    const crosser = crossers[i];
-    const p = pointAt(crosser.s);
-    const pos = trackPosition(crosser.s, crosser.offset);
-    if (!isNearChair(pos.x, pos.y, STUDENT_WIDTH)) continue;
-    // 걷는 방향: 트랙 진행 방향에 수직(옆 방향). speed가 음수면 반대쪽으로
-    let dirX = -p.ty;
-    let dirY = p.tx;
-    if (crosser.speed < 0) {
-      dirX = -dirX;
-      dirY = -dirY;
-    }
-    const facing = Math.atan2(-dirX, dirY);
-    const wobble = Math.sin(crosser.offset * 0.3) * STUDENT_WOBBLE;
-    ctx.save();
-    ctx.translate(pos.x, pos.y);
-    ctx.rotate(facing + wobble);
-    ctx.drawImage(studentImage, -STUDENT_WIDTH / 2, -STUDENT_HEIGHT / 2, STUDENT_WIDTH, STUDENT_HEIGHT);
-    ctx.restore();
-  }
-
-  // ----- 7. 땅 위의 자동차와 의자 (고가 아래를 지나는 중이면 고가보다 먼저 그려서 고가에 가려지게) -----
-  for (let i = 0; i < cars.length; i++) {
-    drawCar(cars[i].s, cars[i].lane, cars[i].speed > 0, false);
-  }
-  if (!chairOnBridge) drawChair();
-
-  // ----- 8. 고가도로: 그림자 → 난간 → 도로 순서로, 땅 위 모든 것 위에 -----
-  // 의자가 고가 아래를 지나는 중이면 고가를 반투명하게 그려서, 아래에 있는 의자·장애물이 보이게 한다
-  if (isChairUnderBridge()) {
-    ctx.globalAlpha = 0.4;
-  }
-  drawRoad(true);
-  drawSkidMarks(true);
-  for (let i = 0; i < cars.length; i++) {
-    drawCar(cars[i].s, cars[i].lane, cars[i].speed > 0, true);
-  }
-  ctx.globalAlpha = 1;
-  if (chairOnBridge) drawChair();
-
-  // ----- 판정 영역 (showHitbox가 true일 때만): 빨간 테두리 -----
-  if (showHitbox) {
-    ctx.strokeStyle = "#ff0000";
-    ctx.lineWidth = 3;
-    const chairBox = getChairHitbox();
-    ctx.strokeRect(chairBox.x, chairBox.y, chairBox.width, chairBox.height);
-    const boxes = getObstacleHitboxes();
-    for (let i = 0; i < boxes.length; i++) {
-      if (isNearChair(boxes[i].x, boxes[i].y, 100)) {
-        ctx.strokeRect(boxes[i].x, boxes[i].y, boxes[i].width, boxes[i].height);
-      }
-    }
-  }
-
-  // ----- 9. 바퀴 연기 -----
-  // 남은 수명이 적을수록 투명해지고, 계산 부분에서 size를 키워서 퍼지며 사라진다
-  for (const smoke of smokes) {
-    ctx.fillStyle = "rgba(220, 220, 220, " + (0.5 * smoke.life / SMOKE_LIFE) + ")";
-    ctx.beginPath();
-    ctx.arc(smoke.x, smoke.y, smoke.size, 0, Math.PI * 2);
-    ctx.fill();
-  }
-
-  // ----- 10~11. 강의실 건물과 문 (결승 지점 위). 연습 서킷에는 없다 -----
-  if (!TRACK.training) {
-    drawClassroom();
-  }
-
-  // ----- 구름 그림자 (땅 위 모든 것 위에, 글자·게이지 아래에) -----
-  // 타원 3개를 겹쳐서 뭉게구름 모양을 만든다
-  ctx.fillStyle = "rgba(0, 0, 0, 0.12)";
-  for (const cloud of clouds) {
-    const r = CLOUD_RADIUS * cloud.size;
-    if (!isNearChair(cloud.x, cloud.y, r)) continue;   // 화면 밖이면 건너뛴다
-    // 한 경로에 담아 한 번에 칠해야 겹친 부분이 더 진해지지 않는다
-    // moveTo로 각 타원의 시작점(오른쪽 끝)으로 먼저 옮겨야 타원끼리 선으로 이어지지 않는다
-    ctx.beginPath();
-    ctx.moveTo(cloud.x + r, cloud.y);
-    ctx.ellipse(cloud.x, cloud.y, r, r * 0.45, 0, 0, Math.PI * 2);                            // 가운데 큰 덩어리
-    ctx.moveTo(cloud.x - r * 0.5 + r * 0.5, cloud.y + r * 0.1);
-    ctx.ellipse(cloud.x - r * 0.5, cloud.y + r * 0.1, r * 0.5, r * 0.35, 0, 0, Math.PI * 2);   // 왼쪽 작은 덩어리
-    ctx.moveTo(cloud.x + r * 0.55 + r * 0.45, cloud.y - r * 0.05);
-    ctx.ellipse(cloud.x + r * 0.55, cloud.y - r * 0.05, r * 0.45, r * 0.3, 0, 0, Math.PI * 2); // 오른쪽 작은 덩어리
-    ctx.fill();
-  }
-
-  // 카메라 끝: 붓을 원래대로 돌린다. 여기부터는 "화면 좌표"로 그린다
-  // 남은 시간과 게이지는 스크롤되지 않고 화면에 붙어 있어야 하기 때문이다
-  ctx.restore();
-
-  // 자동차에 부딪힌 순간 화면 전체가 빨갛게 번쩍였다가 사라진다
-  if (flashTimer > 0) {
-    ctx.fillStyle = "rgba(255, 0, 0, " + (0.35 * flashTimer / 15) + ")";
-    ctx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
-  }
-
-  // 부딪혔을 때 의자 위에 "슬로우!" / "쾅! 스턴" 글자 (화면에 그려서 똑바로 보이게)
-  if (hitMessageTimer > 0) {
-    ctx.fillStyle = hitMessage === "슬로우!" ? "#7ec8ff" : "#ff5c5c";
-    ctx.strokeStyle = "#000000";
-    ctx.lineWidth = 4;
-    ctx.font = "bold 22px sans-serif";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.strokeText(hitMessage, SCREEN_WIDTH / 2, CAMERA_ANCHOR_Y - 60);
-    ctx.fillText(hitMessage, SCREEN_WIDTH / 2, CAMERA_ANCHOR_Y - 60);
-  }
-
-  // 드리프트 중이면 의자 위에 "DRIFT!" 글자를 띄운다
-  // 맵이 아니라 화면에 그려야 화면이 돌아가도 글자가 똑바로 보인다. 의자는 항상 화면의 (가운데, CAMERA_ANCHOR_Y) 근처에 있다
-  if (isDrifting) {
-    ctx.fillStyle = "#ffd84d";
-    ctx.strokeStyle = "#000000";
-    ctx.lineWidth = 3;
-    ctx.font = "bold italic 16px sans-serif";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.strokeText("DRIFT!", SCREEN_WIDTH / 2, CAMERA_ANCHOR_Y - 35);   // 검은 테두리를 먼저 그려서
-    ctx.fillText("DRIFT!", SCREEN_WIDTH / 2, CAMERA_ANCHOR_Y - 35);     // 어느 배경에서도 잘 보이게
-  }
-
-  // ----- 미니맵 (화면 오른쪽 위) -----
-  drawMinimap();
-
-  // ----- 역주행 경고 (화면 가운데 위): 0.6초 주기로 깜빡인다 -----
-  if (wrongWayFrames > WRONG_WAY_DELAY && Date.now() % 600 < 400) {
-    ctx.fillStyle = "rgba(200, 0, 0, 0.75)";
-    ctx.fillRect(SCREEN_WIDTH / 2 - 150, 70, 300, 60);
-    ctx.strokeStyle = "#ffffff";
-    ctx.lineWidth = 3;
-    ctx.strokeRect(SCREEN_WIDTH / 2 - 150, 70, 300, 60);
-    ctx.fillStyle = "#ffffff";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.font = "bold 26px sans-serif";
-    ctx.fillText("⚠ 역주행 중!", SCREEN_WIDTH / 2, 92);
-    ctx.font = "13px sans-serif";
-    ctx.fillText("강의실은 반대 방향이에요", SCREEN_WIDTH / 2, 116);
-  }
-
-  // ----- 12. 글자: 남은 시간 (화면 위 가운데) -----
-  // 글자가 잘 보이게 뒤에 반투명 검은 띠를 깐다 (커지는 글자가 들어가게 넉넉히)
-  ctx.fillStyle = "rgba(0, 0, 0, 0.5)";
-  ctx.fillRect(295, 8, 210, 40);
-
-  // 10초 이하로 남으면 글자를 빨갛게 하고, 1초가 줄 때마다 크게 튀었다가 작아진다
-  let timeFontSize = 24;
-  if (timeLeft <= 10 && !TRACK.training) {
-    ctx.fillStyle = "#ff4d4d";
-    if (timeLeft > 0) {
-      // 마지막으로 1초가 줄어든 뒤 지난 비율 (0 → 1). 막 줄었을 때 가장 크다
-      const passed = 1 - (remainingMs % 1000) / 1000;
-      timeFontSize = 24 + 6 * (1 - Math.min(passed, 1));
-    }
-  } else {
-    ctx.fillStyle = "#ffffff";
-  }
-  ctx.font = "bold " + timeFontSize + "px sans-serif";
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  if (TRACK.training) {
-    // 연습 서킷: 몇 번째 바퀴인지와 지금 바퀴 시간
-    // 달리는 중이면 지금까지, 일시 정지 중이면 멈춘 순간까지의 시간
-    let lapSeconds = 0;
-    if (gameState === "playing") lapSeconds = (Date.now() - lapStartTime) / 1000;
-    if (gameState === "paused" && pausedFrom === "playing") lapSeconds = (pausedAt - lapStartTime) / 1000;
-    ctx.fillStyle = "#ffffff";
-    ctx.font = "bold 22px sans-serif";
-    ctx.fillText("랩 " + (lapsDone + 1) + " · " + lapSeconds.toFixed(1) + "초", 400, 28);
-  } else {
-    ctx.fillText("남은 시간 " + timeLeft + "초", 400, 28);
-  }
-
-  // ----- 13. 부스터 게이지 (화면 아래 가운데) -----
-  // 게이지 뒤 반투명 검은 띠
-  ctx.fillStyle = "rgba(0, 0, 0, 0.5)";
-  ctx.fillRect(GAUGE_X - 10, GAUGE_Y - 26, GAUGE_WIDTH + 20, GAUGE_HEIGHT + 34);
-
-  // 게이지 이름: 가득 차면 노랗게 "부스터 준비! Ctrl"
-  const gaugeReady = boostGauge >= 1;
-  ctx.fillStyle = gaugeReady ? "#ffd84d" : "#ffffff";
-  ctx.font = gaugeReady ? "bold 14px sans-serif" : "14px sans-serif";
-  ctx.fillText(gaugeReady ? "부스터 준비! Ctrl" : "부스터 (드리프트하면 찬다)", 400, GAUGE_Y - 14);
-
-  // 빈 칸: 어두운 막대
-  ctx.fillStyle = "#333333";
-  ctx.fillRect(GAUGE_X, GAUGE_Y, GAUGE_WIDTH, GAUGE_HEIGHT);
-
-  // 찬 칸: 주황 막대 (가로 길이 = 전체 길이 × 찬 비율). 가득 차면 노랗게 깜빡인다
-  ctx.fillStyle = gaugeReady && Date.now() % 500 < 250 ? "#ffd84d" : "#ff9f1c";
-  ctx.fillRect(GAUGE_X, GAUGE_Y, GAUGE_WIDTH * boostGauge, GAUGE_HEIGHT);
-
-  // 게이지 테두리
-  ctx.strokeStyle = "#ffffff";
-  ctx.lineWidth = 1;
-  ctx.strokeRect(GAUGE_X, GAUGE_Y, GAUGE_WIDTH, GAUGE_HEIGHT);
-
-  // ----- 14. 점수 (화면 왼쪽 위): 지금 도착하면 받을 점수 = 남은 시간 × 100 -----
-  ctx.fillStyle = "rgba(0, 0, 0, 0.5)";
-  ctx.fillRect(10, 10, 170, 54);
-  ctx.fillStyle = "#ffffff";
-  ctx.font = "bold 18px sans-serif";
-  ctx.textAlign = "left";
-  ctx.textBaseline = "middle";
-  if (TRACK.training) {
-    // 연습 서킷: 지난 바퀴 기록과 최고 랩
-    ctx.fillText(lastLapSeconds > 0 ? "지난 랩: " + lastLapSeconds.toFixed(2) + "초" : "지난 랩: -", 20, 28);
-    const bestLap = loadBestLap(TRACK_INDEX);
-    ctx.fillStyle = "#ffd84d";
-    ctx.font = "13px sans-serif";
-    ctx.fillText(bestLap > 0 ? "최고 랩: " + bestLap.toFixed(2) + "초" : "최고 랩: 기록 없음", 20, 51);
-  } else {
-    if (gameState === "playing" || gameState === "countdown") {
-      ctx.fillText("점수: " + Math.floor(remainingMs / 10), 20, 28);
-    } else {
-      ctx.fillText("점수: " + score, 20, 28);
-    }
-    // 그 아래 작게: 이 트랙 최고 점수 (8장: 플레이 중에도 목표가 보이게)
-    const bestScore = loadBest(TRACK_INDEX);
-    ctx.fillStyle = "#ffd84d";
-    ctx.font = "13px sans-serif";
-    ctx.fillText(bestScore > 0 ? "최고 점수: " + bestScore : "최고 점수: 기록 없음", 20, 51);
-  }
-
-  // ----- 15. 결과 화면: 도착(성공) 또는 게임 오버(시간 초과) -----
-  if (gameState === "finished") {
-    drawResultScreen("강의실 도착!", "#ffd84d", [
-      TRACK.name + " (" + TRACK.level + ")",
-      "점수: " + score + (isNewRecord ? "  신기록!" : ""),
-      "기록: " + finishSeconds.toFixed(2) + "초",
-      "최고 점수: " + loadBest(TRACK_INDEX),
-    ]);
-  } else if (gameState === "gameover") {
-    drawResultScreen("GAME OVER", "#ff4d4d", [
-      "지각! 결석 처리되었어요",
-      "최종 점수: " + score,
-      "강의실까지 " + Math.floor(chairS / TRACK_LENGTH * 100) + "% 왔어요",
-      "최고 점수: " + loadBest(TRACK_INDEX),
-    ]);
-  }
-
-  // ----- 16. 번아웃 중: 모인 힘 막대 (게이지 위) -----
-  if (isBurnout) {
-    ctx.fillStyle = "rgba(0, 0, 0, 0.55)";
-    ctx.fillRect(290, 488, 220, 42);
-    ctx.fillStyle = "#ffffff";
-    ctx.font = "bold 14px sans-serif";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.fillText("번아웃! ↓만 떼면 출발", 400, 502);
-    ctx.fillStyle = "#333333";
-    ctx.fillRect(300, 514, 200, 10);
-    ctx.fillStyle = "#ff5c5c";
-    ctx.fillRect(300, 514, 200 * burnoutCharge, 10);
-  }
-
-  // ----- 17. 부스터 글자: "출발 부스터!" 같은 알림이 먼저, 없으면 부스터 중 "BOOST!" -----
-  let bigText = "";
-  if (launchMessageTimer > 0) bigText = launchText;
-  else if (boostTimer > 0) bigText = "BOOST!";
-  if (bigText !== "") {
-    ctx.fillStyle = bigText === "너무 빨랐어요" ? "#cccccc" : bigText === "자동차가 빨라졌다!" ? "#ff5c5c" : "#ff9f1c";
-    ctx.strokeStyle = "#000000";
-    ctx.lineWidth = 6;
-    ctx.font = "bold italic 40px sans-serif";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.strokeText(bigText, SCREEN_WIDTH / 2, 150);
-    ctx.fillText(bigText, SCREEN_WIDTH / 2, 150);
-  }
-
-  // ----- 18. 카운트다운: 3, 2, 1 → GO! (GO!는 0.7초 동안) -----
-  let countText = "";
-  if (gameState === "countdown") {
-    countText = String(Math.ceil((COUNTDOWN_MS - (Date.now() - countdownStart)) / 1000));
-  } else if (gameState === "playing" && Date.now() - goTime < 700) {
-    countText = "GO!";
-  }
-  if (countText !== "") {
-    ctx.fillStyle = countText === "GO!" ? "#7CFC00" : "#ffffff";
-    ctx.strokeStyle = "#000000";
-    ctx.lineWidth = 8;
-    ctx.font = "bold 110px sans-serif";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.strokeText(countText, SCREEN_WIDTH / 2, 250);
-    ctx.fillText(countText, SCREEN_WIDTH / 2, 250);
-    if (gameState === "countdown") {
-      ctx.fillStyle = "#ffffff";
-      ctx.lineWidth = 4;
-      ctx.font = "bold 18px sans-serif";
-      ctx.strokeText("GO! 순간에 ↑를 누르면 출발 부스터", SCREEN_WIDTH / 2, 330);
-      ctx.fillText("GO! 순간에 ↑를 누르면 출발 부스터", SCREEN_WIDTH / 2, 330);
-    }
-  }
-
-  // ----- 19. 시작 화면 / 트랙 선택 화면 (맨 위에 덮는다) -----
-  if (gameState === "start") {
-    drawStartScreen();
-  } else if (gameState === "select") {
-    drawTrackSelect();
-  } else if (gameState === "paused") {
-    drawPauseMenu();
-  }
-
-  // ----- 20. 소리 표시 (화면 왼쪽 아래, 모든 화면에서) -----
-  ctx.fillStyle = "rgba(0, 0, 0, 0.5)";
-  ctx.fillRect(10, SCREEN_HEIGHT - 34, 130, 24);
-  ctx.fillStyle = isMuted ? "#ff8a8a" : "#ffffff";
-  ctx.font = "13px sans-serif";
-  ctx.textAlign = "left";
-  ctx.textBaseline = "middle";
-  ctx.fillText(isMuted ? "🔇 소리 꺼짐 (M)" : "🔊 M: 음소거", 18, SCREEN_HEIGHT - 22);
-
-  // ----- 21. 디버그 표시 (showDebug가 true일 때만): 점수 칸 아래에 지금 숫자들 -----
-  if (showDebug) {
-    drawDebugInfo();
-  }
-
-  // ===== ④ 다음 프레임 예약: 다음 그림 때 gameLoop를 또 불러 달라고 부탁한다 =====
-  requestAnimationFrame(gameLoop);
 }
 
-// ============================================================
-// ⑥ 시동: 맵·장애물을 놓고, 이미지를 다 불러오면 게임 루프를 처음 부른다
-// ============================================================
-
-// ===== 맵 꾸미기: 나무·풀·학생·구름을 길을 피해서 배치한다 (시작할 때 한 번) =====
-placeScenery();
-
-// ===== 장애물 배치: 횡단보도 자리 찾기 → 자동차·콘·건너는 학생 만들기 =====
-crosswalks = findCrosswalks();
-createCars();
-createCones();
-createCrossers();
-
-// ===== 이미지 불러오기 =====
-// 이미지는 불러오는 데 시간이 걸린다.
-// 모든 이미지가 다 불러와진 뒤(onload)에 화면을 그려야 빈칸 없이 보인다.
-
-const chairImage = new Image();
-const carImage = new Image();
-const studentImage = new Image();
-const treeImage = new Image();
-const grassImage = new Image();
-
-const allImages = [chairImage, carImage, studentImage, treeImage, grassImage];
-let loadedCount = 0;     // 지금까지 불러온 이미지 개수
-
-for (const image of allImages) {
-  image.onload = function () {
-    loadedCount = loadedCount + 1;
-    // 마지막 이미지까지 다 불러왔으면 게임 루프에 시동을 건다
-    if (loadedCount === allImages.length) {
-      if (gameState === "countdown") startCountdown();   // 트랙을 골라 들어왔으면 3, 2, 1 카운트다운 시작
-      gameLoop();                    // 첫 시동 (그 뒤로는 루프가 스스로 자기를 부른다)
-    }
-  };
+// 더 짧은 기록이면 저장하고 true를 돌려준다
+function saveBestLap(index, seconds) {
+  const best = loadBestLap(index);
+  if (best > 0 && seconds >= best) return false;
+  try {
+    localStorage.setItem("chairDrift.bestLap." + index, seconds.toFixed(2));
+  } catch (e) {
+    // 저장소를 못 쓰면 저장만 건너뛴다
+  }
+  return true;
 }
 
-// src를 정하는 순간 불러오기가 시작된다 (파일 이름은 영어 소문자)
-chairImage.src = "images/chair.svg";
-carImage.src = "images/car.png";
-studentImage.src = "images/student.png";
-treeImage.src = "images/tree.png";
-grassImage.src = "images/grass.png";
+// ===== 시계 밀기: 멈춰 있던 시간(ms)만큼 시작 시각들을 뒤로 → 멈춘 동안 시간이 안 흐른 것처럼 =====
+// 탭을 숨겼다 돌아올 때와 일시 정지에서 계속할 때 쓴다
+function shiftClocks(ms) {
+  startTime = startTime + ms;           // 제한 시간
+  countdownStart = countdownStart + ms; // 3, 2, 1 카운트다운
+  goTime = goTime + ms;                 // GO! 글자와 출발 부스터 판정
+  lapStartTime = lapStartTime + ms;     // 연습 서킷 랩 시계
+  if (upPressTime !== 0) upPressTime = upPressTime + ms;
+}
+
+// ===== 일시 정지 / 계속 / 메뉴 고르기 =====
+function pauseGame() {
+  pausedFrom = gameState;
+  gameState = "paused";
+  pausedAt = Date.now();
+  pauseIndex = 0;
+  for (const key in keys) {
+    keys[key] = false;   // 누르고 있던 키는 뗀 것으로 (계속했을 때 혼자 달려 나가지 않게)
+  }
+}
+
+function resumeGame() {
+  shiftClocks(Date.now() - pausedAt);
+  gameState = pausedFrom;
+}
+
+function choosePauseOption() {
+  if (pauseIndex === 0) {
+    resumeGame();
+  } else if (pauseIndex === 1) {
+    resetGame();             // 처음부터 다시 (3, 2, 1부터)
+  } else {
+    menuIndex = TRACK_INDEX;
+    gameState = "select";
+  }
+}
+
+// ===== 카메라가 따라갈 방향 (0 = 맵 위쪽) =====
+// 평소: 의자가 바라보는 방향
+// 드리프트 중: 바라보는 방향과 실제로 미끄러져 가는 방향의 가운데 (의자가 확 틀어져도 화면이 덜 휘둘린다)
+// 스턴 중: 지금 화면 방향 그대로 (빙글 도는 의자를 따라 화면이 돌면 제일 어지럽다)
+function cameraTargetAngle() {
+  if (stunTimer > 0) return cameraAngle;
+  const speed = Math.hypot(chairVX, chairVY);
+  if (isDrifting && speed > DRIFT_MIN_SPEED) {
+    const moveAngle = Math.atan2(chairVX, -chairVY);   // 실제로 움직이는 방향
+    return chairAngle + angleDiff(moveAngle, chairAngle) * CAMERA_DRIFT_BLEND;
+  }
+  return chairAngle;
+}
+
+// ===== 카메라 돌리기 (매 프레임): 목표 방향 쪽으로 차이의 일부만, 그것도 최대 CAMERA_MAX_TURN까지만 =====
+// 한 번에 다 돌지 않으니 부드럽고, 최대치가 있으니 의자가 휙 돌아도 화면은 천천히 따라온다
+function updateCamera() {
+  const turn = angleDiff(cameraTargetAngle(), cameraAngle) * CAMERA_TURN_FOLLOW;
+  cameraAngle = cameraAngle + Math.max(-CAMERA_MAX_TURN, Math.min(CAMERA_MAX_TURN, turn));
+}
+
+// ===== 소리 장치 켜기: 키를 누를 때마다 불린다 (이미 켜져 있으면 아무것도 안 한다) =====
+function unlockAudio() {
+  try {
+    if (!audioCtx) {
+      const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+      if (!AudioContextClass) return;   // 소리를 못 내는 브라우저면 소리 없이
+      audioCtx = new AudioContextClass();
+    }
+    if (audioCtx.state === "suspended") audioCtx.resume();
+  } catch (e) {
+    audioCtx = null;   // 소리 장치를 못 만들어도 게임은 계속
+  }
+}
+
+// ===== 삑 소리 하나: freq(높이, Hz)에서 시작해 endFreq로 미끄러지며 ms 동안, volume으로 =====
+// type: "sine"(부드럽게) / "square"(삑삑) / "sawtooth"(지잉) / "triangle"(통통)
+// delay만큼 늦게 시작한다 (멜로디를 만들 때)
+function playTone(freq, endFreq, ms, type, volume, delay) {
+  const start = audioCtx.currentTime + (delay || 0) / 1000;
+  const end = start + ms / 1000;
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  osc.type = type;
+  osc.frequency.setValueAtTime(freq, start);
+  osc.frequency.exponentialRampToValueAtTime(endFreq, end);
+  gain.gain.setValueAtTime(volume * SOUND_VOLUME, start);
+  gain.gain.exponentialRampToValueAtTime(0.001, end);   // 점점 작아지며 끝난다 (뚝 끊기는 소리 없이)
+  osc.connect(gain);
+  gain.connect(audioCtx.destination);
+  osc.start(start);
+  osc.stop(end);
+}
+
+// ===== 치익 소리: 무작위 잡음 (부딪히는 소리) =====
+function playNoise(ms, volume) {
+  const length = Math.floor(audioCtx.sampleRate * ms / 1000);
+  const buffer = audioCtx.createBuffer(1, length, audioCtx.sampleRate);
+  const data = buffer.getChannelData(0);
+  for (let i = 0; i < length; i++) {
+    data[i] = (Math.random() * 2 - 1) * (1 - i / length);   // 뒤로 갈수록 작게
+  }
+  const source = audioCtx.createBufferSource();
+  const gain = audioCtx.createGain();
+  gain.gain.value = volume * SOUND_VOLUME;
+  source.buffer = buffer;
+  source.connect(gain);
+  gain.connect(audioCtx.destination);
+  source.start();
+}
+
+// ===== 효과음 재생: 이름으로 부른다. 음소거거나 소리 장치가 없으면 조용히 넘어간다 =====
+// 소리마다 새로 만들어서 재생하니까, 빠르게 연달아 나도 끊기지 않고 겹쳐서 난다
+function playSound(name) {
+  if (isMuted || !audioCtx) return;
+  try {
+    if (name === "count") playTone(440, 440, 150, "square", 0.5);         // 3, 2, 1: 짧은 삑
+    if (name === "go") playTone(880, 880, 400, "square", 0.5);            // GO!: 높고 긴 삑
+    if (name === "bump") playTone(260, 120, 120, "triangle", 0.9);        // 학생·콘: 통
+    if (name === "crash") {                                               // 자동차: 쾅
+      playNoise(300, 0.8);
+      playTone(150, 50, 300, "sawtooth", 0.6);
+    }
+    if (name === "boost") playTone(200, 900, 450, "sawtooth", 0.35);      // 부스터: 지이잉 올라가는 소리
+    if (name === "finish" || name === "record") {                        // 도착: 도-미-솔-도
+      const notes = [523, 659, 784, 1047];
+      for (let i = 0; i < notes.length; i++) {
+        playTone(notes[i], notes[i], 180, "triangle", 0.7, i * 120);
+      }
+      if (name === "record") playTone(1319, 1319, 400, "triangle", 0.7, 520);   // 신기록이면 한 음 더
+    }
+    if (name === "gameover") {                                            // 시간 초과: 내려가는 음
+      playTone(392, 392, 250, "square", 0.4);
+      playTone(330, 330, 250, "square", 0.4, 250);
+      playTone(262, 196, 500, "square", 0.4, 500);
+    }
+  } catch (e) {
+    // 소리에 문제가 생겨도 게임은 멈추지 않게
+  }
+}
+
+// ===== 음소거 상태 저장·불러오기 (브라우저에 저장) =====
+function loadMuted() {
+  try {
+    return localStorage.getItem("chairDrift.muted") === "true";   // 저장된 건 글자라서 "true"와 비교한다
+  } catch (e) {
+    return false;
+  }
+}
+
+function saveMuted(value) {
+  try {
+    localStorage.setItem("chairDrift.muted", String(value));
+  } catch (e) {
+    // 저장소를 못 쓰면 저장만 건너뛴다
+  }
+}
