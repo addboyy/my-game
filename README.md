@@ -45,7 +45,15 @@
 | images/chair.svg | 시작 화면 의자 그림, 탭 아이콘 | 직접 제작 (SVG) | - |
 | 의자·자동차·학생·콘·나무·건물·고가 3D 모델 | 플레이어와 장애물, 배경 | 직접 제작 — Three.js 기본 도형(상자·원기둥·공)을 코드로 조립 | - |
 | 잔디·건물 벽·문 무늬 | 바닥과 건물 | 직접 제작 — 코드에서 canvas로 그려서 붙임 | - |
-| 효과음 전부 (카운트다운, 충돌, 부스터, 도착, 시간 초과) | 효과음 | 직접 제작 — 소리 파일 없이 Web Audio API로 코드에서 합성 (`script.js`의 `playSound`) | - |
+| sounds/crash1.wav, crash2.wav, crash3.wav | 자동차 충돌 (무작위로 하나) | Kenney Impact Sounds — https://kenney.nl/assets/impact-sounds (원래 파일 impactMetal_heavy_000~002.ogg) | CC0 |
+| sounds/bump_student.wav | 학생과 부딪힘 | Kenney Impact Sounds (impactSoft_heavy_000.ogg) | CC0 |
+| sounds/bump_cone.wav | 공사 콘과 부딪힘 | Kenney Impact Sounds (impactGeneric_light_000.ogg) | CC0 |
+| sounds/rail.wav | 가드레일에 세게 부딪힘 | Kenney Impact Sounds (impactMetal_light_000.ogg) | CC0 |
+| sounds/ui_move.wav, ui_ok.wav, ui_back.wav | 메뉴 고르기 / 결정 / 닫기 | Kenney Interface Sounds — https://kenney.nl/assets/interface-sounds (select_001, confirmation_001, back_001.ogg) | CC0 |
+| 엔진 소리, 드리프트 끽 소리 | 속도에 따라 높낮이가 바뀌는 엔진, 드리프트 중 타이어 | 직접 제작 — Web Audio API로 코드에서 합성 (`createEngineSound`, `updateEngineSound`) | - |
+| 카운트다운·GO·부스터·도착·신기록·시간 초과 소리 | 효과음 | 직접 제작 — Web Audio API로 코드에서 합성 (`playSound`) | - |
+
+Kenney 효과음은 `.ogg` 파일이라, 아이폰 사파리에서도 나도록 `.wav`(모노 22050Hz)로 바꿔서 넣었다. 소리 자체는 바꾸지 않았다.
 
 2D (`2d/`)
 | 파일 | 용도 | 출처 | 라이선스 |

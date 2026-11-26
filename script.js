@@ -389,16 +389,17 @@ document.addEventListener("keydown", function (e) {
   }
   // Esc: 달리는 중(카운트다운 포함)이면 일시 정지 메뉴, 메뉴에서는 계속하기, 트랙 선택 화면에서는 시작 화면으로
   if (e.key === "Escape") {
-    if (gameState === "playing" || gameState === "countdown") pauseGame();
-    else if (gameState === "paused") resumeGame();
-    else if (gameState === "select") gameState = "start";
+    unlockAudio();
+    if (gameState === "playing" || gameState === "countdown") { pauseGame(); playSound("uiBack"); }
+    else if (gameState === "paused") { resumeGame(); playSound("uiBack"); }
+    else if (gameState === "select") { gameState = "start"; playSound("uiBack"); }
     return;
   }
   // 일시 정지 메뉴: ↑↓로 고르고 Enter. 메뉴 중에는 키가 게임에 들어가지 않게 여기서 끝낸다
   if (gameState === "paused") {
-    if (e.key === "ArrowUp") pauseIndex = (pauseIndex + PAUSE_OPTIONS.length - 1) % PAUSE_OPTIONS.length;
-    if (e.key === "ArrowDown") pauseIndex = (pauseIndex + 1) % PAUSE_OPTIONS.length;
-    if (e.key === "Enter") choosePauseOption();
+    if (e.key === "ArrowUp") { pauseIndex = (pauseIndex + PAUSE_OPTIONS.length - 1) % PAUSE_OPTIONS.length; playSound("uiMove"); }
+    if (e.key === "ArrowDown") { pauseIndex = (pauseIndex + 1) % PAUSE_OPTIONS.length; playSound("uiMove"); }
+    if (e.key === "Enter") { playSound("uiOk"); choosePauseOption(); }
     return;
   }
 
@@ -423,6 +424,7 @@ document.addEventListener("keydown", function (e) {
   // 시작 화면: 아무 키나 누르면 트랙 선택으로 (이 키는 여기서 끝낸다. Enter가 트랙 선택까지 바로 넘어가지 않게)
   if (gameState === "start") {
     gameState = "select";
+    playSound("uiOk");
     return;
   }
 
@@ -434,9 +436,9 @@ document.addEventListener("keydown", function (e) {
 
   // 트랙 선택 화면: ← → 로 고르고 Enter로 출발
   if (gameState === "select") {
-    if (e.key === "ArrowLeft") menuIndex = (menuIndex + TRACKS.length - 1) % TRACKS.length;
-    if (e.key === "ArrowRight") menuIndex = (menuIndex + 1) % TRACKS.length;
-    if (e.key === "Enter") chooseTrack(menuIndex);
+    if (e.key === "ArrowLeft") { menuIndex = (menuIndex + TRACKS.length - 1) % TRACKS.length; playSound("uiMove"); }
+    if (e.key === "ArrowRight") { menuIndex = (menuIndex + 1) % TRACKS.length; playSound("uiMove"); }
+    if (e.key === "Enter") { playSound("uiOk"); chooseTrack(menuIndex); }
   }
   // T 키: 결과 화면에서 트랙 선택으로 (한글 입력 상태의 "ㅅ"도 받게 e.code도 본다)
   if (isLetterKey(e, "T") && (gameState === "finished" || gameState === "gameover")) {
@@ -460,7 +462,9 @@ let hiddenAt = 0;   // 탭이 숨겨진 시각 (0 = 숨겨져 있지 않음)
 document.addEventListener("visibilitychange", function () {
   if (document.hidden) {
     hiddenAt = Date.now();
+    if (audioCtx) audioCtx.suspend();   // 9장: 엔진 소리가 다른 탭에서도 계속 웅웅거리지 않게
   } else if (hiddenAt !== 0) {
+    if (audioCtx) audioCtx.resume();
     // 일시 정지 중이었으면 건너뛴다 (계속할 때 멈춰 있던 시간 전체를 한꺼번에 민다)
     if (gameState !== "paused") shiftClocks(Date.now() - hiddenAt);
     hiddenAt = 0;
@@ -493,12 +497,39 @@ const LEVEL_UP_SECONDS = 10;      // 몇 초마다 어려워지나
 let carSpeedRate = CAR_SPEED_START;    // 지금 자동차 속도 배율
 let nextLevelUp = LEVEL_UP_SECONDS;    // 다음에 어려워질 시점 (출발 후 초). 한 번만 올리려고 다음 시점을 미뤄 둔다
 
-// ===== 소리 (8장): 소리 파일 없이 Web Audio로 그 자리에서 만든다 (직접 제작) =====
+// ===== 소리 (8장, 9장) =====
+// 8장: 소리 파일 없이 Web Audio로 그 자리에서 만든 소리 (카운트다운, 부스터, 도착, 시간 초과)
+// 9장: 부딪히는 소리·메뉴 소리는 녹음된 효과음 파일(sounds/, Kenney CC0)로, 엔진·드리프트는 계속 이어지는 소리로 추가
 // 브라우저는 키를 한 번이라도 누르기 전에는 소리를 못 내게 막는다 → 키를 누를 때 unlockAudio()로 소리를 켠다
 const SOUND_VOLUME = 0.25;        // 전체 음량 (0~1). 교실에서 쓰니까 작게
+const SAMPLE_VOLUME = 0.5;        // 효과음 파일 음량 (0~1)
+const ENGINE_VOLUME = 0.05;       // 엔진 소리 음량 (계속 나니까 작게)
+const SKID_VOLUME = 0.06;         // 드리프트 끽 소리 음량
 let audioCtx = null;              // 소리를 만드는 장치 (처음 키를 누를 때 만든다)
 let isMuted = loadMuted();        // M 키 음소거 (브라우저에 저장해서 새로고침해도 유지)
 let lastCountBeep = 0;            // 카운트다운에서 마지막으로 삑 소리를 낸 숫자 (3, 2, 1)
+let engineSound = null;           // 엔진·드리프트 소리 장치 (처음 키를 누를 때 만든다)
+let railSoundCooldown = 0;        // 가드레일 소리를 한 번 내면 이만큼(프레임) 쉰다 (긁는 동안 계속 나지 않게)
+
+// 효과음 파일: 같은 종류가 여러 개면 무작위로 하나 (매번 똑같은 소리면 질린다)
+// 파일은 처음에 한 번만 불러 두고, 낼 때마다 복사본(cloneNode)으로 재생한다 → 빠르게 연달아 나도 겹쳐서 난다
+const SAMPLE_FILES = {
+  crash: ["sounds/crash1.wav", "sounds/crash2.wav", "sounds/crash3.wav"],   // 자동차: 금속 쾅
+  student: ["sounds/bump_student.wav"],                                   // 학생: 퍽
+  cone: ["sounds/bump_cone.wav"],                                         // 공사 콘: 툭
+  rail: ["sounds/rail.wav"],                                              // 가드레일: 챙
+  uiMove: ["sounds/ui_move.wav"],                                         // 메뉴 고르기
+  uiOk: ["sounds/ui_ok.wav"],                                             // 메뉴 결정
+  uiBack: ["sounds/ui_back.wav"],                                         // 메뉴 닫기·뒤로
+};
+const samples = {};
+for (const name in SAMPLE_FILES) {
+  samples[name] = SAMPLE_FILES[name].map(function (file) {
+    const audio = new Audio(file);
+    audio.preload = "auto";
+    return audio;
+  });
+}
 
 // ===== 부스터 (기획서: 드리프트하면 게이지가 차고, 다 차면 Ctrl로 부스터) =====
 const DRIFT_GAUGE_RATE = 0.006;  // 최고 속도로 드리프트할 때 한 프레임에 차는 게이지 (0.006 → 약 2.8초면 가득)
@@ -1486,6 +1517,7 @@ function gameLoop(now) {
   }
   render3D();
   updateHud();
+  updateEngineSound();   // 9장: 엔진 높낮이와 드리프트 끽 소리를 지금 속도에 맞춘다
   requestAnimationFrame(gameLoop);
 }
 
@@ -1708,6 +1740,7 @@ function updateGame() {
   hitMessageTimer = Math.max(0, hitMessageTimer - 1);
   flashTimer = Math.max(0, flashTimer - 1);
   boostTimer = Math.max(0, boostTimer - 1);
+  railSoundCooldown = Math.max(0, railSoundCooldown - 1);
   miniBoostTimer = Math.max(0, miniBoostTimer - 1);
   launchMessageTimer = Math.max(0, launchMessageTimer - 1);
 
@@ -2078,6 +2111,11 @@ function updateChairTrack() {
     chairY = chairY - outY * (dist - limit);
     // 바깥으로 가던 속도는 없애고 조금 안쪽으로 튕긴다 (내적: 속도 중 바깥 방향 몫)
     const outSpeed = chairVX * outX + chairVY * outY;
+    // 9장: 세게 부딪히면 가드레일 소리 (긁는 동안 계속 나지 않게 잠깐 쉰다)
+    if (outSpeed > 2 && railSoundCooldown === 0) {
+      playSound("rail");
+      railSoundCooldown = 20;
+    }
     if (outSpeed > 0) {
       chairVX = chairVX - outX * outSpeed * (1 + WALL_BOUNCE);
       chairVY = chairVY - outY * outSpeed * (1 + WALL_BOUNCE);
@@ -2168,7 +2206,7 @@ function hitObstacle(box) {
     chairVY = chairVY * 0.3;
     slowTimer = SLOW_FRAMES;
     hitMessage = "슬로우!";
-    playSound("bump");
+    playSound(box.type === "cone" ? "cone" : "student");
     // 콘은 튕겨 나가서 사라진다 (배열에서 빼낸다)
     if (box.type === "cone") {
       cones.splice(box.index, 1);
@@ -2546,6 +2584,7 @@ function unlockAudio() {
       const AudioContextClass = window.AudioContext || window.webkitAudioContext;
       if (!AudioContextClass) return;   // 소리를 못 내는 브라우저면 소리 없이
       audioCtx = new AudioContextClass();
+      createEngineSound();
     }
     if (audioCtx.state === "suspended") audioCtx.resume();
   } catch (e) {
@@ -2596,11 +2635,18 @@ function playSound(name) {
   try {
     if (name === "count") playTone(440, 440, 150, "square", 0.5);         // 3, 2, 1: 짧은 삑
     if (name === "go") playTone(880, 880, 400, "square", 0.5);            // GO!: 높고 긴 삑
-    if (name === "bump") playTone(260, 120, 120, "triangle", 0.9);        // 학생·콘: 통
-    if (name === "crash") {                                               // 자동차: 쾅
-      playNoise(300, 0.8);
-      playTone(150, 50, 300, "sawtooth", 0.6);
+    // 9장: 녹음된 효과음 (파일을 못 불러왔으면 예전 합성음으로)
+    if (name === "student" || name === "cone") {                          // 학생: 퍽 / 콘: 툭
+      if (!playSample(name, 0.9)) playTone(260, 120, 120, "triangle", 0.9);
     }
+    if (name === "crash") {                                               // 자동차: 금속 쾅 + 낮게 우르릉
+      if (!playSample("crash", 1)) playTone(150, 50, 300, "sawtooth", 0.6);
+      playNoise(300, 0.5);
+    }
+    if (name === "rail") playSample("rail", 0.5);                         // 가드레일: 챙
+    if (name === "uiMove") playSample("uiMove", 0.6);                     // 메뉴 고르기
+    if (name === "uiOk") playSample("uiOk", 0.7);                         // 메뉴 결정
+    if (name === "uiBack") playSample("uiBack", 0.6);                     // 메뉴 닫기
     if (name === "boost") playTone(200, 900, 450, "sawtooth", 0.35);      // 부스터: 지이잉 올라가는 소리
     if (name === "finish" || name === "record") {                        // 도착: 도-미-솔-도
       const notes = [523, 659, 784, 1047];
@@ -2617,6 +2663,85 @@ function playSound(name) {
   } catch (e) {
     // 소리에 문제가 생겨도 게임은 멈추지 않게
   }
+}
+
+// ===== 효과음 파일 재생 (9장): 그 종류 중 하나를 무작위로 골라 복사본으로 재생. 못 내면 false =====
+function playSample(name, volume) {
+  const list = samples[name];
+  if (!list || list.length === 0) return false;
+  const original = list[Math.floor(Math.random() * list.length)];
+  if (original.error) return false;   // 파일을 못 불러왔다 (이름이 틀렸거나 없다)
+  const copy = original.cloneNode();  // 복사본: 앞 소리가 끝나기 전에 또 나도 겹쳐서 난다
+  copy.volume = Math.min(1, volume * SAMPLE_VOLUME);
+  copy.play().catch(function () {});  // 재생이 막혀도 게임은 계속
+  return true;
+}
+
+// ===== 엔진·드리프트 소리 만들기 (9장, 처음 키를 누를 때 한 번) =====
+// 엔진: 낮은 "부르릉" = 톱니파 두 개(살짝 다른 높이라 떨림이 생긴다) → 높은 소리를 깎는 필터 → 음량
+// 드리프트: "끼익" = 잡음을 계속 돌려 틀고, 높은 음 근처만 남기는 필터 → 음량
+// 둘 다 음량 0으로 시작해서, updateEngineSound가 매 프레임 속도에 맞게 높이·음량을 바꾼다
+function createEngineSound() {
+  try {
+    const engineGain = audioCtx.createGain();
+    engineGain.gain.value = 0;
+    const engineFilter = audioCtx.createBiquadFilter();
+    engineFilter.type = "lowpass";
+    engineFilter.frequency.value = 500;
+    const osc1 = audioCtx.createOscillator();
+    const osc2 = audioCtx.createOscillator();
+    osc1.type = "sawtooth";
+    osc2.type = "sawtooth";
+    osc1.connect(engineFilter);
+    osc2.connect(engineFilter);
+    engineFilter.connect(engineGain);
+    engineGain.connect(audioCtx.destination);
+    osc1.start();
+    osc2.start();
+
+    const noise = audioCtx.createBuffer(1, audioCtx.sampleRate, audioCtx.sampleRate);   // 1초짜리 잡음
+    const data = noise.getChannelData(0);
+    for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+    const skidSource = audioCtx.createBufferSource();
+    skidSource.buffer = noise;
+    skidSource.loop = true;
+    const skidFilter = audioCtx.createBiquadFilter();
+    skidFilter.type = "bandpass";
+    skidFilter.frequency.value = 1700;
+    skidFilter.Q.value = 4;
+    const skidGain = audioCtx.createGain();
+    skidGain.gain.value = 0;
+    skidSource.connect(skidFilter);
+    skidFilter.connect(skidGain);
+    skidGain.connect(audioCtx.destination);
+    skidSource.start();
+
+    engineSound = { osc1: osc1, osc2: osc2, engineGain: engineGain, engineFilter: engineFilter, skidGain: skidGain, skidFilter: skidFilter };
+  } catch (e) {
+    engineSound = null;   // 못 만들어도 게임은 계속
+  }
+}
+
+// ===== 엔진·드리프트 소리를 지금 상태에 맞추기 (매 프레임) =====
+// 빠를수록 엔진이 높고 크다. 부스터 중엔 더 높다. 달리는 중(카운트다운 포함)이 아니거나 음소거면 0
+// setTargetAtTime: 값을 한 번에 바꾸지 않고 0.05~0.1초에 걸쳐 부드럽게 따라가게 한다 (뚝뚝 끊기는 소리 없이)
+function updateEngineSound() {
+  if (!engineSound || !audioCtx) return;
+  const now = audioCtx.currentTime;
+  const running = (gameState === "playing" || gameState === "countdown") && !isMuted;
+  const speed = Math.hypot(chairVX, chairVY);
+  const speedRatio = Math.min(1.6, speed / CHAIR_SPEED);   // 부스터 중엔 1보다 크다
+  const pitch = 45 + speedRatio * 75 + (isBurnout ? 40 * burnoutCharge : 0);   // 45Hz(멈춤) ~ 120Hz(최고 속도)
+  engineSound.osc1.frequency.setTargetAtTime(pitch, now, 0.08);
+  engineSound.osc2.frequency.setTargetAtTime(pitch * 1.01, now, 0.08);
+  engineSound.engineFilter.frequency.setTargetAtTime(350 + speedRatio * 700, now, 0.1);
+  const throttleOn = keys["ArrowUp"] || boostTimer > 0 || isBurnout;
+  const engineVolume = running ? ENGINE_VOLUME * (0.5 + 0.5 * Math.min(1, speedRatio) + (throttleOn ? 0.3 : 0)) : 0;
+  engineSound.engineGain.gain.setTargetAtTime(engineVolume, now, 0.1);
+  // 드리프트 끽: 빠르게 미끄러질수록 크고 조금 높다
+  const skidVolume = running && isDrifting ? SKID_VOLUME * Math.min(1, speedRatio) : 0;
+  engineSound.skidGain.gain.setTargetAtTime(skidVolume, now, 0.05);
+  engineSound.skidFilter.frequency.setTargetAtTime(1400 + speedRatio * 600, now, 0.1);
 }
 
 // ===== 음소거 상태 저장·불러오기 (브라우저에 저장) =====
