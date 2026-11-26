@@ -376,6 +376,12 @@ createCones();
 createCrossers();
 
 // ===== 키보드 입력 (2D 버전과 같다) =====
+// 영어 글자 키(R, T, M, D)가 눌렸나: 대문자·소문자, 그리고 한글 입력 상태도 받는다
+// 한글 입력 상태면 e.key가 "ㄱ"처럼 한글로 들어오므로, 키보드 자리 이름(e.code, 예: "KeyR")도 같이 본다
+// (9장 리팩터링: 같은 세 조건이 네 군데에 반복되던 것을 이 함수 하나로 묶었다. 동작은 그대로)
+function isLetterKey(e, letter) {
+  return e.key === letter.toLowerCase() || e.key === letter || e.code === "Key" + letter;
+}
 document.addEventListener("keydown", function (e) {
   // 방향키·스페이스바로 페이지가 스크롤되지 않게 막는다
   if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", " ", "Control", "Enter"].includes(e.key)) {
@@ -401,7 +407,7 @@ document.addEventListener("keydown", function (e) {
     upPressTime = Date.now();
   }
   // R 키: 도착했거나 게임 오버일 때 다시 시작 (한글 입력 상태의 "ㄱ"도 받게 e.code도 본다)
-  if ((e.key === "r" || e.key === "R" || e.code === "KeyR") && (gameState === "finished" || gameState === "gameover")) {
+  if (isLetterKey(e, "R") && (gameState === "finished" || gameState === "gameover")) {
     resetGame();
   }
 
@@ -409,7 +415,7 @@ document.addEventListener("keydown", function (e) {
   unlockAudio();
 
   // M 키: 음소거 켜고 끄기 (한글 입력 상태의 "ㅡ"도 받게 e.code도 본다)
-  if (e.key === "m" || e.key === "M" || e.code === "KeyM") {
+  if (isLetterKey(e, "M")) {
     isMuted = !isMuted;
     saveMuted(isMuted);
   }
@@ -421,7 +427,7 @@ document.addEventListener("keydown", function (e) {
   }
 
   // D 키: 디버그 표시를 켜고 끈다 (한글 입력 상태의 "ㅇ"도 받게 e.code도 본다)
-  if (e.key === "d" || e.key === "D" || e.code === "KeyD") {
+  if (isLetterKey(e, "D")) {
     showDebug = !showDebug;
     showHitbox = showDebug;
   }
@@ -433,7 +439,7 @@ document.addEventListener("keydown", function (e) {
     if (e.key === "Enter") chooseTrack(menuIndex);
   }
   // T 키: 결과 화면에서 트랙 선택으로 (한글 입력 상태의 "ㅅ"도 받게 e.code도 본다)
-  if ((e.key === "t" || e.key === "T" || e.code === "KeyT") && (gameState === "finished" || gameState === "gameover")) {
+  if (isLetterKey(e, "T") && (gameState === "finished" || gameState === "gameover")) {
     menuIndex = TRACK_INDEX;
     gameState = "select";
   }
